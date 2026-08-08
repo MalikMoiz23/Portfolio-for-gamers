@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import * as audio from './audio'
 
 /* Reactive state — only things that should re-render React live here.
  * Anything that changes every frame lives in `nav` below (plain mutable
@@ -14,6 +15,8 @@ export const state = {
   audioOn: false,
   plain: false, // plain-text resume fallback is showing
   hoverRoom: -1, // door the cursor is over
+  nearDoor: -1, // door you are standing close enough to open
+  running: false,
   lowSpec: false, // dropped by the perf monitor on weak GPUs
   hintSeen: false,
 }
@@ -42,9 +45,20 @@ export function useStore(selector) {
   )
 }
 
+/* Both the click on a door and the proximity trigger come through here, so the
+ * door only ever opens one way and always with the same noise. */
+export function enterRoom(index) {
+  if (state.phase !== 'walk') return
+  set({ phase: 'entering', activeRoom: index, hoverRoom: -1 })
+  audio.doorOpen()
+  audio.stinger()
+}
+
 /* Start backing out of whichever room you are standing in. */
 export function leaveRoom() {
-  if (state.phase === 'inside') set({ phase: 'leaving' })
+  if (state.phase !== 'inside') return
+  set({ phase: 'leaving' })
+  audio.doorClose()
 }
 
 /* Per-frame values. Never put these in React state. */
@@ -56,7 +70,9 @@ export const nav = {
   roomT: 0, // 0 outside the room, 1 fully inside
   lookX: 0, // mouse-driven head turn, radians
   lookY: 0,
-  bob: 0,
+  strafe: 0, // manual left/right offset in the corridor
+  lateral: 0, // actual sideways position, manual drift plus door pull
+  bobPhase: 0, // advances with distance; one footstep every half cycle
   flicker: 1,
 }
 

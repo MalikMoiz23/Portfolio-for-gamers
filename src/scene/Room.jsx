@@ -2,18 +2,27 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { B } from '../layout'
+import { ROOMS } from '../content'
 import { materials } from './materials'
 import { planeUV, boxUV, rng, damp } from './util'
 import { makeSign } from '../textures'
+import { makeRoomBoards } from '../board'
 import { nav } from '../store'
 
 const D = 0.42
+
+/* Boards are a fixed height and take their width from the canvas aspect the
+ * layout engine chose, so type is never stretched. */
+const BOARD_H = 2.15
+const BOARD_GAP = 0.16
+const BOARD_Y = 1.68
 
 /* ---------------------------------------------------------------------------
  * One room, built in local space:
  *   +x runs away from the corridor, 0 = the doorway wall, roomD = the far wall
  *   z runs along the corridor, centred on the door
- * The whole group is then flipped for doors on the left-hand side.
+ * The whole group is flipped for doors on the left, which is a rotation rather
+ * than a scale — so nothing on the boards ends up mirrored.
  * ------------------------------------------------------------------------- */
 
 function Shell() {
@@ -37,12 +46,9 @@ function Shell() {
     <group>
       <mesh geometry={g.floor} material={m.floor} rotation={[-Math.PI / 2, 0, 0]} position={[B.roomD / 2, 0, 0]} receiveShadow />
       <mesh geometry={g.ceil} material={m.ceiling} rotation={[Math.PI / 2, 0, 0]} position={[B.roomD / 2, B.roomH, 0]} receiveShadow />
-      {/* far wall */}
       <mesh geometry={g.far} material={m.wall} position={[B.roomD, B.roomH / 2, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow />
-      {/* the two long walls */}
       <mesh geometry={g.side} material={m.wall} position={[B.roomD / 2, B.roomH / 2, -B.roomW / 2]} receiveShadow />
       <mesh geometry={g.side} material={m.wall} position={[B.roomD / 2, B.roomH / 2, B.roomW / 2]} rotation={[0, Math.PI, 0]} receiveShadow />
-      {/* the doorway wall, in two pieces with a lintel over the opening */}
       <mesh geometry={g.nearA} material={m.wall} position={[0, B.roomH / 2, off]} rotation={[0, Math.PI / 2, 0]} receiveShadow />
       <mesh geometry={g.nearA} material={m.wall} position={[0, B.roomH / 2, -off]} rotation={[0, Math.PI / 2, 0]} receiveShadow />
       <mesh geometry={g.lintel} material={m.wall} position={[0, (B.roomH + B.doorH) / 2, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow />
@@ -52,8 +58,78 @@ function Shell() {
   )
 }
 
+/* ---- the content, hung on the far wall ----------------------------------- */
+
+function Boards({ room, index }) {
+  const boards = useMemo(() => makeRoomBoards(room, index, ROOMS.length), [room, index])
+
+  const bw = BOARD_H * (boards[0].w / boards[0].h)
+  const n = boards.length
+  const step = bw + BOARD_GAP
+  const start = -((n - 1) * step) / 2
+
+  const open = (href) => (e) => {
+    e.stopPropagation()
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
+  const cursor = (v) => () => {
+    document.body.style.cursor = v
+  }
+
+  return (
+    <group>
+      {boards.map((b, i) => (
+        // local +x of the plane maps to world +z, so board 0 sits screen-left
+        <group key={i} position={[B.roomD - 0.05, BOARD_Y, start + i * step]} rotation={[0, -Math.PI / 2, 0]}>
+          {/* frame */}
+          <mesh position={[0, 0, -0.025]}>
+            <planeGeometry args={[bw + 0.1, BOARD_H + 0.1]} />
+            <meshStandardMaterial color="#1b1e1b" roughness={0.5} metalness={0.75} envMapIntensity={1.3} />
+          </mesh>
+          {/* the printed face — lightly self-lit so it stays legible in the dark */}
+          <mesh>
+            <planeGeometry args={[bw, BOARD_H]} />
+            <meshStandardMaterial
+              map={b.texture}
+              emissiveMap={b.texture}
+              /* low: the picture light does most of the work. Push this up and
+                 the text crosses the bloom threshold and smears. */
+              emissive="#ffffff"
+              emissiveIntensity={0.2}
+              roughness={0.82}
+              metalness={0}
+            />
+          </mesh>
+          {/* clickable regions sitting exactly over any link or project card */}
+          {b.hotspots.map((h, k) => (
+            <mesh
+              key={k}
+              position={[(h.u + h.uw / 2 - 0.5) * bw, (0.5 - (h.v + h.vh / 2)) * BOARD_H, 0.014]}
+              onClick={open(h.href)}
+              onPointerOver={cursor('pointer')}
+              onPointerOut={cursor('auto')}
+            >
+              <planeGeometry args={[h.uw * bw, h.vh * BOARD_H]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {/* one picture light for the whole wall, not one per board — every extra
+          light is another full pass over every fragment it touches */}
+      <pointLight
+        position={[B.roomD - 0.6, BOARD_Y + BOARD_H / 2 + 0.25, 0]}
+        color="#dfe7f2"
+        intensity={4.5}
+        distance={6.5}
+        decay={1.8}
+      />
+    </group>
+  )
+}
+
 /* A caged bulb on a flex, swinging very slightly. */
-function Bulb({ accent, x = B.roomD * 0.5, z = 0, power = 9 }) {
+function Bulb({ accent, x, z, power = 12 }) {
   const swing = useRef()
   const light = useRef()
   const mat = useRef()
@@ -81,45 +157,28 @@ function Bulb({ accent, x = B.roomD * 0.5, z = 0, power = 9 }) {
           <sphereGeometry args={[0.045, 12, 10]} />
           <meshStandardMaterial ref={mat} color="#100e0a" emissive={accent} emissiveIntensity={3.4} toneMapped={false} />
         </mesh>
-        <pointLight ref={light} position={[0, -0.47, 0]} color={accent} intensity={power} distance={9} decay={2} castShadow={false} />
+        <pointLight ref={light} position={[0, -0.47, 0]} color={accent} intensity={power} distance={9} decay={2} />
       </group>
     </group>
   )
 }
 
-/* Big stencilled section name on the far wall — the thing you read first. */
-function WallTitle({ room }) {
+/* Stencilled room name, high on a side wall — the boards carry the real title,
+ * this is just so the space is labelled when you look around. */
+function SideStencil({ room }) {
   const tex = useMemo(
-    () =>
-      makeSign(room.title, {
-        w: 1024,
-        h: 320,
-        bg: '#191b18',
-        fg: '#cfcbb8',
-        font: 'bold 150px "Courier New", monospace',
-        sub: room.subtitle,
-        seed: 61,
-      }),
+    () => makeSign(room.title, { w: 512, h: 160, bg: '#191b18', fg: '#b6b3a2', font: 'bold 74px "Courier New", monospace', seed: 61 }),
     [room],
   )
   return (
-    <group position={[B.roomD - 0.012, 2.18, 0]} rotation={[0, -Math.PI / 2, 0]}>
-      {/* a frame, so the plate reads as a fitted sign rather than a rectangle
-          that someone pasted onto the wall */}
-      <mesh position={[0, 0, -0.03]}>
-        <planeGeometry args={[3.16, 1.1]} />
-        <meshStandardMaterial color="#1c1f1c" roughness={0.55} metalness={0.7} envMapIntensity={1.2} />
-      </mesh>
-      <mesh>
-        <planeGeometry args={[3.0, 0.94]} />
-        <meshStandardMaterial map={tex} emissiveMap={tex} emissive={room.accent} emissiveIntensity={0.7} roughness={0.9} />
-      </mesh>
-      <pointLight position={[0, 0.72, 0.85]} color={room.accent} intensity={2.6} distance={4.2} decay={2} />
-    </group>
+    <mesh position={[B.roomD * 0.42, 2.62, -B.roomW / 2 + 0.012]}>
+      <planeGeometry args={[1.5, 0.47]} />
+      <meshStandardMaterial map={tex} emissiveMap={tex} emissive={room.accent} emissiveIntensity={0.3} roughness={0.9} />
+    </mesh>
   )
 }
 
-/* ---- per-section furniture ---------------------------------------------- */
+/* ---- dressing, kept along the side walls so it never blocks the boards ---- */
 
 function Desk() {
   const m = materials()
@@ -127,79 +186,29 @@ function Desk() {
     () => ({
       top: boxUV(1.7, 0.05, 0.78, 1.6),
       leg: boxUV(0.06, 0.72, 0.06, 3),
-      chairSeat: boxUV(0.46, 0.05, 0.44, 2),
-      chairBack: boxUV(0.44, 0.5, 0.05, 2),
+      seat: boxUV(0.46, 0.05, 0.44, 2),
+      back: boxUV(0.44, 0.5, 0.05, 2),
       monitor: boxUV(0.58, 0.36, 0.04, 2),
       mug: new THREE.CylinderGeometry(0.04, 0.035, 0.09, 12),
     }),
     [],
   )
   return (
-    <group position={[B.roomD - 0.75, 0, -1.3]} rotation={[0, -Math.PI / 2, 0]}>
+    <group position={[B.roomD * 0.55, 0, -B.roomW / 2 + 0.5]}>
       <mesh geometry={g.top} material={m.steel} position={[0, 0.74, 0]} castShadow receiveShadow />
       {[-0.78, 0.78].map((x) =>
-        [-0.33, 0.33].map((z) => (
-          <mesh key={`${x}${z}`} geometry={g.leg} material={m.steel} position={[x, 0.36, z]} castShadow />
-        )),
+        [-0.33, 0.33].map((z) => <mesh key={`${x}${z}`} geometry={g.leg} material={m.steel} position={[x, 0.36, z]} castShadow />),
       )}
       <mesh geometry={g.monitor} material={m.steel} position={[0.1, 0.98, -0.2]} rotation={[0, 0.2, 0]} castShadow />
       <mesh geometry={g.mug} material={m.wall} position={[-0.5, 0.81, 0.1]} castShadow />
       <group position={[0.05, 0, 0.72]} rotation={[0, 0.35, 0]}>
-        <mesh geometry={g.chairSeat} material={m.steel} position={[0, 0.46, 0]} castShadow />
-        <mesh geometry={g.chairBack} material={m.steel} position={[0, 0.72, -0.2]} castShadow />
-        {[-0.19, 0.19].map((x) =>
-          [-0.18, 0.18].map((z) => (
-            <mesh key={`c${x}${z}`} geometry={g.leg} material={m.steel} position={[x, 0.23, z]} scale={[1, 0.64, 1]} />
-          )),
-        )}
+        <mesh geometry={g.seat} material={m.steel} position={[0, 0.46, 0]} castShadow />
+        <mesh geometry={g.back} material={m.steel} position={[0, 0.72, -0.2]} castShadow />
       </group>
     </group>
   )
 }
 
-/* Backlit boards, one per project — the room reads as a gallery. */
-function ProjectBoards({ room }) {
-  const items = (room.blocks.find((b) => b.kind === 'cards')?.items ?? []).slice(0, 4)
-  const boards = useMemo(
-    () =>
-      items.map((it, i) =>
-        makeSign(it.title, {
-          w: 512,
-          h: 320,
-          bg: '#101210',
-          fg: '#e2ded0',
-          font: 'bold 58px "Courier New", monospace',
-          sub: it.meta || '',
-          seed: 800 + i * 13,
-        }),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [room],
-  )
-  const span = B.roomW - 2.4
-  return (
-    <group>
-      {boards.map((tex, i) => {
-        const z = boards.length > 1 ? -span / 2 + (span / (boards.length - 1)) * i : 0
-        return (
-          <group key={i} position={[B.roomD - 0.16, 1.5, z]}>
-            <mesh rotation={[0, -Math.PI / 2, 0]}>
-              <planeGeometry args={[1.05, 0.66]} />
-              <meshStandardMaterial map={tex} emissiveMap={tex} emissive={room.accent} emissiveIntensity={1.5} roughness={0.7} toneMapped={false} />
-            </mesh>
-            <mesh position={[0.06, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
-              <planeGeometry args={[1.18, 0.79]} />
-              <meshStandardMaterial color="#1a1c1a" roughness={0.6} metalness={0.8} envMapIntensity={1.2} />
-            </mesh>
-            <pointLight position={[-0.5, 0, 0]} color={room.accent} intensity={1.6} distance={3.2} decay={2} />
-          </group>
-        )
-      })}
-    </group>
-  )
-}
-
-/* Industrial racking, loaded unevenly. */
 function Shelves() {
   const m = materials()
   const g = useMemo(
@@ -223,7 +232,7 @@ function Shelves() {
   }, [])
 
   return (
-    <group position={[B.roomD - 0.34, 0, 1.6]}>
+    <group position={[B.roomD * 0.55, 0, B.roomW / 2 - 0.36]} rotation={[0, Math.PI / 2, 0]}>
       {[0, 1, 2, 3].map((i) => (
         <mesh key={i} geometry={g.shelf} material={m.steel} position={[0, 0.42 + i * 0.52, 0]} castShadow receiveShadow />
       ))}
@@ -237,21 +246,14 @@ function Shelves() {
   )
 }
 
-/* A row of filing cabinets, one drawer left hanging open. */
 function Cabinets() {
   const m = materials()
-  const g = useMemo(
-    () => ({
-      body: boxUV(0.62, 1.32, 0.46, 1.6),
-      drawer: boxUV(0.05, 0.28, 0.42, 2),
-    }),
-    [],
-  )
+  const g = useMemo(() => ({ body: boxUV(0.62, 1.32, 0.46, 1.6), drawer: boxUV(0.05, 0.28, 0.42, 2) }), [])
   const r = useMemo(() => rng(707), [])
-  const units = useMemo(() => [0, 1, 2, 3].map((i) => ({ z: -1.9 + i * 0.72, open: r() < 0.3 ? 0.24 : 0, lvl: Math.floor(r() * 4) })), [r])
+  const units = useMemo(() => [0, 1, 2, 3].map((i) => ({ z: -1.1 + i * 0.72, open: r() < 0.3 ? 0.24 : 0, lvl: Math.floor(r() * 4) })), [r])
 
   return (
-    <group position={[B.roomD - 0.34, 0, 0]} rotation={[0, 0, 0]}>
+    <group position={[B.roomD * 0.5, 0, -B.roomW / 2 + 0.32]} rotation={[0, Math.PI / 2, 0]}>
       {units.map((u, i) => (
         <group key={i} position={[0, 0, u.z]}>
           <mesh geometry={g.body} material={m.steel} position={[0, 0.66, 0]} castShadow receiveShadow />
@@ -270,50 +272,46 @@ function Cabinets() {
   )
 }
 
-/* A payphone bolted to the far wall, and the way out. */
 function ExitFittings({ accent }) {
   const m = materials()
-  const tex = useMemo(() => makeSign('EXIT', { w: 512, h: 200, bg: '#0d0f0c', fg: '#e8fff0', font: 'bold 104px "Courier New", monospace', seed: 12 }), [])
+  const tex = useMemo(
+    () => makeSign('EXIT', { w: 512, h: 200, bg: '#0d0f0c', fg: '#e8fff0', font: 'bold 104px "Courier New", monospace', seed: 12 }),
+    [],
+  )
   const g = useMemo(
-    () => ({
-      phone: boxUV(0.18, 0.42, 0.26, 2),
-      handset: boxUV(0.07, 0.06, 0.24, 3),
-      table: boxUV(0.5, 0.04, 1.0, 2),
-      leg: boxUV(0.05, 0.72, 0.05, 3),
-    }),
+    () => ({ phone: boxUV(0.18, 0.42, 0.26, 2), handset: boxUV(0.07, 0.06, 0.24, 3), table: boxUV(0.5, 0.04, 1.0, 2), leg: boxUV(0.05, 0.72, 0.05, 3) }),
     [],
   )
   return (
     <group>
-      {/* off to one side: dead centre puts it straight through the room's own
-          name plate, which sits at the same height */}
-      <mesh position={[B.roomD - 0.02, 2.42, -2.0]} rotation={[0, -Math.PI / 2, 0]}>
+      {/* over the way you came in, where an exit sign actually belongs */}
+      <mesh position={[0.03, B.doorH + 0.42, 0]} rotation={[0, Math.PI / 2, 0]}>
         <planeGeometry args={[0.9, 0.35]} />
         <meshBasicMaterial map={tex} color={accent} toneMapped={false} />
       </mesh>
-      <pointLight position={[B.roomD - 0.5, 2.36, -2.0]} color={accent} intensity={2.4} distance={4} decay={2} />
+      <pointLight position={[0.55, B.doorH + 0.36, 0]} color={accent} intensity={3} distance={4} decay={2} />
 
-      <group position={[B.roomD - 0.2, 0, -2.2]}>
+      <group position={[B.roomD * 0.5, 0, -B.roomW / 2 + 0.2]} rotation={[0, Math.PI / 2, 0]}>
         <mesh geometry={g.phone} material={m.steel} position={[0, 1.35, 0]} castShadow />
         <mesh geometry={g.handset} material={m.steel} position={[-0.13, 1.05, 0.02]} rotation={[0.2, 0, 0.5]} castShadow />
       </group>
-
-      <group position={[B.roomD - 0.35, 0, 2.1]}>
+      <group position={[B.roomD * 0.55, 0, B.roomW / 2 - 0.4]} rotation={[0, Math.PI / 2, 0]}>
         <mesh geometry={g.table} material={m.steel} position={[0, 0.74, 0]} castShadow receiveShadow />
-        {[-0.2, 0.2].map((x) =>
-          [-0.43, 0.43].map((z) => <mesh key={`${x}${z}`} geometry={g.leg} material={m.steel} position={[x, 0.36, z]} />),
-        )}
+        {[-0.2, 0.2].map((x) => [-0.43, 0.43].map((z) => <mesh key={`${x}${z}`} geometry={g.leg} material={m.steel} position={[x, 0.36, z]} />))}
       </group>
     </group>
   )
 }
 
-function Furniture({ room }) {
+function Dressing({ room }) {
   switch (room.id) {
-    case 'about':
-      return <Desk />
     case 'projects':
-      return <ProjectBoards room={room} />
+      return (
+        <>
+          <Shelves />
+          <Desk />
+        </>
+      )
     case 'skills':
       return <Shelves />
     case 'experience':
@@ -328,30 +326,37 @@ function Furniture({ room }) {
 /* ---- the room, mounted only while you are in it -------------------------- */
 
 export default function Room({ door }) {
-  const { side, z, room } = door
+  const { side, z, room, index } = door
   const grp = useRef()
 
-  // local +x must point away from the corridor
   const rot = side === -1 ? Math.PI : 0
   const originX = side * (B.width / 2 + B.recess)
 
   useFrame(() => {
-    // rooms stay hidden until the door actually starts to swing, which keeps
-    // the corridor cheap and stops the interior popping through the leaf
     if (grp.current) grp.current.visible = nav.roomT > 0.001
   })
 
   return (
     <group ref={grp} position={[originX, 0, z]} rotation={[0, rot, 0]}>
       <Shell />
-      <WallTitle room={room} />
-      <Furniture room={room} />
-      <Bulb accent={room.accent} x={B.roomD * 0.42} z={-0.4} power={15} />
-      {/* fill from behind the camera's shoulder, so the fittings are silhouettes
-          against a lit wall rather than black shapes in a black room */}
-      <pointLight position={[1.0, 2.2, 1.6]} color={room.accent} intensity={2.0} distance={7} decay={2} />
-      <pointLight position={[B.roomD - 1.2, 1.1, -2.4]} color="#8fa2b8" intensity={1.5} distance={5.5} decay={2} />
-      <ambientLight intensity={0.075} color={room.accent} />
+      <Boards room={room} index={index} />
+      <SideStencil room={room} />
+      <Dressing room={room} />
+      <Bulb accent={room.accent} x={B.roomD * 0.34} z={0} power={13} />
+      {/* wash across the board wall, from above and behind you */}
+      <spotLight
+        position={[B.roomD * 0.45, B.roomH - 0.15, 0]}
+        target-position={[B.roomD, 1.6, 0]}
+        angle={0.85}
+        penumbra={1}
+        intensity={15}
+        distance={11}
+        decay={1.7}
+        color="#cfd9e6"
+      />
+      <pointLight position={[1.2, 2.1, 1.8]} color={room.accent} intensity={2.2} distance={7} decay={2} />
+      <pointLight position={[1.2, 2.1, -1.8]} color={room.accent} intensity={1.6} distance={7} decay={2} />
+      <ambientLight intensity={0.09} color={room.accent} />
     </group>
   )
 }

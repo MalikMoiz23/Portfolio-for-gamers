@@ -1,33 +1,47 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { B, DOORS, MAX_POS, cameraZ } from '../layout'
-import { nav, state, set, leaveRoom } from '../store'
+import { nav, state, set, leaveRoom, enterRoom } from '../store'
 import { clamp, clamp01, damp, easeInOut, lerp } from './util'
 import * as audio from '../audio'
 
 const ENTER_TIME = 2.6
 const LEAVE_TIME = 1.5
 
-/* Inside a room the text panel occupies the right-hand side of a wide screen,
- * so turn the head slightly right — which slides the room's own signage and
- * fittings into the clear left half. On narrow screens the panel is a bottom
- * sheet instead, and the bias would just aim you at a blank side wall. */
-const PANEL_BIAS = -0.26
-let wideLayout = typeof window !== 'undefined' && window.innerWidth > 720
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => {
-    wideLayout = window.innerWidth > 720
-  })
-}
+const WALK_SPEED = 3.2
+const RUN_SPEED = 6.6
+const SPRINT_AT = 3.9 // m/s above which a scroll counts as running
 
-/* The camera, and everything that moves it: scroll, keys, touch, head bob,
- * the walk through a doorway, and the footsteps that go with all of it. */
+/* How far you can move across the corridor, and how strongly a door pulls you
+ * towards it as you come alongside. */
+const STRAFE_LIMIT = B.width / 2 - 0.52
+const DOOR_PULL = 0.8
+const PULL_RANGE = 5.0
+
+/* Standing near a door opens it — but only if you have actually slowed down
+ * beside it. Without the speed test you could never get past door one. */
+const OPEN_RADIUS = 2.4
+const OPEN_MAX_SPEED = 1.35
+const OPEN_DWELL = 0.3
+const RELEASE_RADIUS = 4.6
+
+/* Radians of bob per metre walked. Lower when running, because a running
+ * stride is nearly twice as long — you take fewer, bigger steps per metre but
+ * cover the ground faster, so the cadence in time still goes up. */
+const BOB_PER_M_WALK = 4.18
+const BOB_PER_M_RUN = 2.33
+
 export default function Rig() {
   const { camera, gl } = useThree()
   const keys = useRef(new Set())
   const posAtEnter = useRef(0)
-  const lastStep = useRef(0)
+  const lateralAtEnter = useRef(0)
+  const lastHalfStep = useRef(0)
+  const stepParity = useRef(0)
   const targetLook = useRef({ x: 0, y: 0 })
+  const dwell = useRef(0)
+  const blocked = useRef(-1) // door you just walked out of
+  const wasRunning = useRef(false)
 
   useEffect(() => {
     camera.rotation.order = 'YXZ'
@@ -43,18 +57,21 @@ export default function Rig() {
       nav.target = clamp(nav.target + e.deltaY * 0.0072, 0, MAX_POS)
     }
 
-    let touchY = null
+    let touch = null
     const onTouchStart = (e) => {
-      touchY = e.touches[0].clientY
+      touch = { x: e.touches[0].clientX, y: e.touches[0].clientY }
     }
     const onTouchMove = (e) => {
-      if (touchY === null || state.phase !== 'walk') return
+      if (!touch || state.phase !== 'walk') return
+      const x = e.touches[0].clientX
       const y = e.touches[0].clientY
-      nav.target = clamp(nav.target + (touchY - y) * 0.016, 0, MAX_POS)
-      touchY = y
+      nav.target = clamp(nav.target + (touch.y - y) * 0.016, 0, MAX_POS)
+      // dragging sideways walks you across the corridor towards a door
+      nav.strafe = clamp(nav.strafe + (x - touch.x) * 0.006, -STRAFE_LIMIT, STRAFE_LIMIT)
+      touch = { x, y }
     }
     const onTouchEnd = () => {
-      touchY = null
+      touch = null
     }
 
     const onKeyDown = (e) => {
@@ -62,18 +79,18 @@ export default function Rig() {
         leaveRoom()
         return
       }
-      if (e.key === 'Enter' && state.hoverRoom >= 0 && state.phase === 'walk') return
       keys.current.add(e.key.toLowerCase())
       if ([' ', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key)) e.preventDefault()
     }
     const onKeyUp = (e) => keys.current.delete(e.key.toLowerCase())
+    const onBlur = () => keys.current.clear()
 
     const onPointerMove = (e) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1
       const ny = (e.clientY / window.innerHeight) * 2 - 1
-      const range = state.phase === 'inside' ? 0.42 : 0.2
+      const range = state.phase === 'inside' ? 0.5 : 0.2
       targetLook.current.x = -nx * range
-      targetLook.current.y = clamp(-ny * range * 0.62, -0.3, 0.3)
+      targetLook.current.y = clamp(-ny * range * 0.6, -0.32, 0.32)
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -82,6 +99,7 @@ export default function Rig() {
     el.addEventListener('touchend', onTouchEnd)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
     window.addEventListener('pointermove', onPointerMove)
     return () => {
       el.removeEventListener('wheel', onWheel)
@@ -90,46 +108,59 @@ export default function Rig() {
       el.removeEventListener('touchend', onTouchEnd)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
       window.removeEventListener('pointermove', onPointerMove)
     }
   }, [gl])
 
   useFrame((s, rawDt) => {
-    // clamped so a stalled tab does not teleport you, but not so tightly that
-    // a slow machine makes every transition crawl
     const dt = Math.min(rawDt, 1 / 12)
     const t = s.clock.elapsedTime
     const phase = state.phase
+    const k = keys.current
+    const holdingRun = k.has('shift')
 
-    /* ---- scroll / keys ---- */
+    /* ---- forward / sideways input ---- */
     if (phase === 'walk') {
-      const k = keys.current
       let drive = 0
       if (k.has('w') || k.has('arrowup') || k.has(' ')) drive += 1
       if (k.has('s') || k.has('arrowdown')) drive -= 1
-      if (drive !== 0) nav.target = clamp(nav.target + drive * 3.1 * dt, 0, MAX_POS)
+      if (drive !== 0) {
+        const spd = holdingRun ? RUN_SPEED : WALK_SPEED
+        nav.target = clamp(nav.target + drive * spd * dt, 0, MAX_POS)
+      }
+      let strafeIn = 0
+      if (k.has('a') || k.has('arrowleft')) strafeIn -= 1
+      if (k.has('d') || k.has('arrowright')) strafeIn += 1
+      if (strafeIn !== 0) {
+        nav.strafe = clamp(nav.strafe + strafeIn * 2.4 * dt, -STRAFE_LIMIT, STRAFE_LIMIT)
+      }
     }
 
-    /* ---- the walk through a door ---- */
+    /* ---- room transitions ---- */
     if (phase === 'entering') {
-      if (nav.roomT === 0) posAtEnter.current = nav.pos
+      if (nav.roomT === 0) {
+        posAtEnter.current = nav.pos
+        lateralAtEnter.current = nav.lateral
+      }
       nav.roomT = Math.min(1, nav.roomT + dt / ENTER_TIME)
       if (nav.roomT >= 1) set({ phase: 'inside' })
     } else if (phase === 'leaving') {
       nav.roomT = Math.max(0, nav.roomT - dt / LEAVE_TIME)
       if (nav.roomT <= 0) {
-        set({ phase: 'walk', activeRoom: -1 })
+        blocked.current = state.activeRoom
+        set({ phase: 'walk', activeRoom: -1, nearDoor: -1 })
         nav.target = nav.pos
+        dwell.current = 0
       }
     }
 
-    /* ---- position ---- */
+    /* ---- position along the corridor ---- */
     const door = state.activeRoom >= 0 ? DOORS[state.activeRoom] : null
     const prevZ = camera.position.z
     const prevX = camera.position.x
 
     if (door) {
-      // walk the last few metres up to the doorway, then turn and step in
       const doorPos = B.entry - door.z
       const walk = easeInOut(clamp01(nav.roomT / 0.42))
       nav.pos = lerp(posAtEnter.current, doorPos, walk)
@@ -139,38 +170,102 @@ export default function Rig() {
     }
 
     const baseZ = cameraZ(nav.pos)
-    let x = 0
+
+    /* ---- doors pull you across the corridor as you come alongside ---- */
+    let pull = 0
+    let nearest = -1
+    let nearestDist = 1e9
+    if (!door) {
+      for (const d of DOORS) {
+        const dz = Math.abs(baseZ - d.z)
+        if (dz < PULL_RANGE) {
+          const w = 1 - dz / PULL_RANGE
+          pull += d.side * DOOR_PULL * w * w
+        }
+        const dist = Math.hypot(baseZ - d.z, nav.lateral - d.x)
+        if (dist < nearestDist) {
+          nearestDist = dist
+          nearest = d.index
+        }
+      }
+    }
+    const lateralTarget = clamp(nav.strafe + pull, -STRAFE_LIMIT, STRAFE_LIMIT)
+    nav.lateral = damp(nav.lateral, lateralTarget, 3.2, dt)
+
+    /* ---- position and orientation ---- */
+    let x = nav.lateral
     let yaw = 0
 
     if (door) {
       const e = easeInOut(clamp01((nav.roomT - 0.3) / 0.7))
       const p1 = door.side * (B.width / 2 + B.recess)
-      const p2 = door.side * (B.width / 2 + B.recess + B.roomD * 0.4)
-      x = 2 * (1 - e) * e * p1 + e * e * p2
-      const turn = (-door.side * Math.PI) / 2 + (wideLayout ? PANEL_BIAS : 0)
-      yaw = easeInOut(clamp01((nav.roomT - 0.22) / 0.78)) * turn
+      const p2 = door.side * (B.width / 2 + B.recess + B.roomD * 0.66)
+      const from = lateralAtEnter.current
+      x = from * (1 - e) * (1 - e) + 2 * (1 - e) * e * p1 + e * e * p2
+      yaw = easeInOut(clamp01((nav.roomT - 0.22) / 0.78)) * ((-door.side * Math.PI) / 2)
+    } else if (nearest >= 0 && nearestDist < PULL_RANGE) {
+      /* Turn to look at the door as you draw level with it. This aims at where
+       * the door actually is rather than leaning a fixed amount — standing
+       * right beside one puts it nearly 60° off the corridor axis, so any fixed
+       * angle small enough to look natural further out leaves it off-screen at
+       * the moment you are about to walk through it. */
+      const d = DOORS[nearest]
+      const dz = Math.abs(baseZ - d.z)
+      const w = Math.pow(clamp01(1 - dz / PULL_RANGE), 1.5)
+      const bearing = Math.atan2(-(d.x - x), -(d.z - baseZ))
+      yaw = clamp(w * bearing, -0.95, 0.95)
     }
 
-    /* ---- head bob and footsteps ---- */
+    /* ---- gait ---- */
     const moved = Math.hypot(baseZ - prevZ, x - prevX)
     nav.speed = damp(nav.speed, moved / Math.max(dt, 1e-4), 8, dt)
     nav.walked += moved
 
-    const gait = clamp01(nav.speed / 2.4)
-    const amp = 0.012 + gait * 0.036
-    const bobY = Math.sin(nav.walked * 3.6) * amp
-    const bobX = Math.sin(nav.walked * 1.8) * amp * 0.7
-    const roll = Math.sin(nav.walked * 1.8) * gait * 0.012
-    // you are still breathing even when you stop
+    const sprinting = phase === 'walk' && (nav.speed > SPRINT_AT || (holdingRun && nav.speed > 0.6))
+    if (sprinting !== state.running) set({ running: sprinting })
+
+    nav.bobPhase += moved * (sprinting ? BOB_PER_M_RUN : BOB_PER_M_WALK)
+
+    const gait = clamp01(nav.speed / (sprinting ? 6 : 2.4))
+    const amp = (sprinting ? 0.03 : 0.012) + gait * (sprinting ? 0.062 : 0.036)
+    const bobY = Math.sin(nav.bobPhase) * amp
+    const bobX = Math.sin(nav.bobPhase * 0.5) * amp * 0.8
+    const roll = Math.sin(nav.bobPhase * 0.5) * gait * (sprinting ? 0.03 : 0.012)
     const breathe = Math.sin(t * 0.9) * 0.006 + Math.sin(t * 0.37) * 0.004
 
-    const step = Math.floor((nav.walked * 3.6) / Math.PI)
-    if (step !== lastStep.current) {
-      if (gait > 0.06) audio.footstep(0.35 + gait * 0.65)
-      lastStep.current = step
+    // one footstep every half cycle of the bob
+    const half = Math.floor(nav.bobPhase / Math.PI)
+    if (half !== lastHalfStep.current) {
+      if (gait > 0.06) {
+        audio.footstep(0.4 + gait * 0.6, sprinting)
+        stepParity.current++
+        if (sprinting && stepParity.current % 2 === 0) audio.breath(stepParity.current % 4 === 0)
+      }
+      lastHalfStep.current = half
     }
+    if (!sprinting && wasRunning.current) audio.breath(false)
+    wasRunning.current = sprinting
 
-    camera.position.set(x + bobX * 0.5, B.eye + bobY + breathe, baseZ)
+    camera.position.set(x + bobX * 0.4, B.eye + bobY + breathe, baseZ)
+
+    /* ---- stand near a door and it opens ---- */
+    if (phase === 'walk') {
+      if (blocked.current >= 0) {
+        const bd = DOORS[blocked.current]
+        if (Math.hypot(baseZ - bd.z, x - bd.x) > RELEASE_RADIUS) blocked.current = -1
+      }
+      const armed = nearest >= 0 && nearestDist < OPEN_RADIUS && nearest !== blocked.current
+      if (state.nearDoor !== (armed ? nearest : -1)) set({ nearDoor: armed ? nearest : -1 })
+      if (armed && nav.speed < OPEN_MAX_SPEED) {
+        dwell.current += dt
+        if (dwell.current >= OPEN_DWELL) {
+          dwell.current = 0
+          enterRoom(nearest)
+        }
+      } else {
+        dwell.current = 0
+      }
+    }
 
     /* ---- look ---- */
     nav.lookX = damp(nav.lookX, targetLook.current.x, 3.4, dt)

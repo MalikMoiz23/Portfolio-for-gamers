@@ -44,10 +44,25 @@ Content inside a room is a list of `blocks`:
 Two things are not in `content.js`:
 
 - **Your resume PDF** — drop it at `public/resume.pdf` for the download link to work.
-- **In-room furniture** — `Furniture()` in `src/scene/Room.jsx` switches on the room `id`.
+- **In-room fittings** — `Dressing()` in `src/scene/Room.jsx` switches on the room `id`.
   The five built-in ids (`about`, `projects`, `skills`, `experience`, `contact`) each get their
-  own fittings; anything else falls back to the desk. A new section works fine without
+  own furniture; anything else falls back to the desk. A new section works fine without
   touching this — it just gets the default room.
+
+### The content is printed on the walls
+
+There is no text overlay. Each room's blocks are laid out by `src/board.js` into boards that
+hang on the far wall, and you read them by standing in the room and looking at them. Short
+content becomes one big board with large type; long content spreads across up to three. The
+layout engine picks whichever it needs and scales the type to fill it.
+
+Anything with an `href` — project cards, contact links — gets an invisible quad floated over
+it in 3D, so it stays clickable. Without that, putting contact details on a wall would mean
+nobody could click them.
+
+The cost of this is real and worth stating: wall text cannot be selected, zoomed, or read by
+a screen reader, and it does not reflow on a phone. That is what the plain resume below is
+for. Do not delete it.
 
 ---
 
@@ -67,17 +82,18 @@ Keep this. It costs you nothing and it is the version that gets read when someon
 | Path                     | What it does                                                        |
 | ------------------------ | ------------------------------------------------------------------- |
 | `src/content.js`         | **your content**                                                    |
+| `src/board.js`           | lays content out onto the wall boards, and emits their hotspots     |
 | `src/layout.js`          | every dimension of the building, in metres                          |
 | `src/textures.js`        | the procedural materials — seeded noise baked to canvas             |
-| `src/audio.js`           | the synthesised drone, footsteps, hinges and electrical ticks       |
+| `src/audio.js`           | the whole soundtrack, synthesised — bed, footsteps, doors, reverb   |
 | `src/store.js`           | state; per-frame values live in `nav`, deliberately outside React    |
-| `src/scene/Rig.jsx`      | the camera: scroll, keys, touch, head bob, walking through a door   |
+| `src/scene/Rig.jsx`      | the camera: walking, running, strafing, door pull, entering a room  |
 | `src/scene/Corridor.jsx` | walls, floor, ceiling, failing tubes, pipes, debris, signage        |
 | `src/scene/Door.jsx`     | one steel fire door, hinged, with light leaking under it            |
-| `src/scene/Room.jsx`     | the room shell and its fittings                                     |
+| `src/scene/Room.jsx`     | the room shell, its wall boards and its fittings                    |
 | `src/scene/Flashlight.jsx` | the torch, its lag, its dying battery, and the haze in the beam   |
 | `src/scene/Effects.jsx`  | bloom, grain, fringing, vignette                                    |
-| `src/ui/`                | title card, HUD, room panel, plain resume                           |
+| `src/ui/`                | title card, HUD, plain resume                                       |
 
 ### Tuning the building
 
@@ -129,13 +145,35 @@ Stripped from production builds.
 
 ## Controls
 
-| Input                 | Does                                  |
-| --------------------- | ------------------------------------- |
-| Scroll / swipe        | Walk                                  |
-| `W` `S` / arrows      | Walk, held                            |
-| Move mouse            | Look                                  |
-| Click a door          | Go in                                 |
-| `Esc`                 | Come back out                         |
+| Input                      | Does                                                    |
+| -------------------------- | ------------------------------------------------------- |
+| Scroll / swipe up          | Walk forward                                            |
+| Scroll hard                | Break into a run                                        |
+| `W` `S` / arrows           | Walk, held                                              |
+| `Shift`                    | Run                                                     |
+| `A` `D` / swipe sideways   | Step across the corridor                                |
+| Move mouse                 | Look                                                    |
+| **Stop beside a door**     | It unlatches and swings open on its own                 |
+| Click a door               | Same, from further away                                 |
+| `Esc`                      | Leave the room                                          |
 
-Sound is off until you ask for it — browsers block audio without a gesture, and a portfolio
+### Why the door does not open every time you pass one
+
+Proximity alone would make the corridor impossible — the trigger radius is 2.4 m and the
+doors are 8.6 m apart, so more than half the hallway would be a trap and you could never
+reach the last room. It also requires you to have **slowed down** beside the door, and holds
+that state for a third of a second before firing. Run past and nothing happens; stop and it
+opens. On the way out, the door you just left is suppressed until you are 4.6 m clear of it,
+otherwise you would be pulled straight back in.
+
+### Sound
+
+Everything is synthesised at runtime and fed through a procedurally generated convolution
+reverb, which is most of what makes it sound like a corridor rather than a set of beeps.
+The bed is a sub drone, a detuned pad on a slow filter sweep, ventilation hiss, a heartbeat,
+and randomly scheduled knocks, metal groans and whispers. Footsteps change character between
+walking and running — harder strike, longer stride, grit kicked forward — and running adds
+breathing on alternate strides.
+
+Sound is off until you ask for it. Browsers block audio without a gesture, and a portfolio
 that makes noise unprompted is a portfolio people close.

@@ -32,9 +32,10 @@ export default function Effects() {
 
   return (
     <EffectComposer multisampling={4} frameBufferType={THREE.HalfFloatType}>
-      {/* threshold high enough that only actual light sources bloom — at 0.3 a
-          lit doorway reveal blows out into a white slab */}
-      <Bloom intensity={0.58} luminanceThreshold={0.46} luminanceSmoothing={0.3} mipmapBlur radius={0.7} />
+      {/* Threshold high enough that only actual light sources bloom. Lower and
+          a lit doorway reveal blows into a white slab, and the text on the room
+          boards grows a halo that reads as out of focus. */}
+      <Bloom intensity={0.55} luminanceThreshold={0.62} luminanceSmoothing={0.26} mipmapBlur radius={0.68} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
       <HueSaturation saturation={-0.14} hue={0} />
       <BrightnessContrast brightness={0.018} contrast={0.09} />

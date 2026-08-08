@@ -5,8 +5,7 @@ import { B } from '../layout'
 import { materials } from './materials'
 import { planeUV, boxUV, damp } from './util'
 import { makeSign } from '../textures'
-import { state, nav, set } from '../store'
-import * as audio from '../audio'
+import { state, nav, set, enterRoom, useStore } from '../store'
 
 /* A steel fire door set into a recess in the corridor wall. Closed until you
  * click it. Light the colour of whatever is in the room leaks under it. */
@@ -14,11 +13,13 @@ export default function Door({ door }) {
   const { side, z, index, room } = door
   const m = materials()
   const [hover, setHover] = useState(false)
+  const isActive = useStore((s) => s.activeRoom === index)
 
   const hinge = useRef()
   const plateMat = useRef()
   const bleedMat = useRef()
   const glow = useRef()
+  const flood = useRef()
   const voidPanel = useRef()
 
   const wallX = side * (B.width / 2)
@@ -57,21 +58,22 @@ export default function Door({ door }) {
       // swings away from the corridor, into the room
       hinge.current.rotation.y = damp(hinge.current.rotation.y, side * 1.5 * open, 4, dt)
     }
-    const near = state.phase === 'walk'
+    const walking = state.phase === 'walk'
+    // "primed" is the door you have stopped beside, which is about to open on
+    // its own — it needs to look different from one you are merely pointing at
+    const primed = walking && state.nearDoor === index
+    const lit = (hover && walking) || primed
     const pulse = 0.72 + Math.sin(s.clock.elapsedTime * 1.4 + index) * 0.08
-    const want = (hover && near ? 2.6 : 1.0) * pulse + open * 3.5
+    const want = (primed ? 4.2 : lit ? 2.6 : 1.0) * pulse + open * 3.5
     if (glow.current) glow.current.intensity = damp(glow.current.intensity, want, 6, dt)
     if (plateMat.current) {
-      plateMat.current.emissiveIntensity = damp(
-        plateMat.current.emissiveIntensity,
-        hover && near ? 1.5 : 0.3,
-        6,
-        dt,
-      )
+      plateMat.current.emissiveIntensity = damp(plateMat.current.emissiveIntensity, primed ? 2.2 : lit ? 1.5 : 0.3, 6, dt)
     }
     if (bleedMat.current) {
-      bleedMat.current.opacity = damp(bleedMat.current.opacity, 0.55 + (hover && near ? 0.4 : 0) + open * 0.5, 6, dt)
+      bleedMat.current.opacity = damp(bleedMat.current.opacity, 0.55 + (lit ? 0.4 : 0) + open * 0.5, 6, dt)
     }
+    // light dumps out of the opening as the leaf swings clear
+    if (flood.current) flood.current.intensity = damp(flood.current.intensity, open * 26, 5, dt)
   })
 
   const enter = (e) => {
@@ -79,9 +81,7 @@ export default function Door({ door }) {
     if (state.phase !== 'walk') return
     setHover(false)
     document.body.style.cursor = 'auto'
-    audio.creak()
-    audio.stinger()
-    set({ phase: 'entering', activeRoom: index, hoverRoom: -1 })
+    enterRoom(index)
   }
 
   const over = (e) => {
@@ -182,6 +182,23 @@ export default function Door({ door }) {
         distance={3.4}
         decay={2}
       />
+      {/* What the room throws into the corridor once the door is off its latch.
+          Mounted only for the door being opened: a spotlight costs a full pass
+          over every fragment it reaches, and five of them standing by all the
+          time cost more frame time than this effect is worth. */}
+      {isActive && (
+        <spotLight
+          ref={flood}
+          position={[backX, 1.5, 0]}
+          target-position={[wallX - side * 2.6, 1.1, 0]}
+          angle={0.95}
+          penumbra={1}
+          intensity={0}
+          distance={8}
+          decay={1.8}
+          color={accent}
+        />
+      )}
 
       {/* invisible click target covering the whole doorway */}
       <mesh

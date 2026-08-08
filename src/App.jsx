@@ -5,7 +5,6 @@ import Scene from './scene/Scene'
 import Boot from './ui/Boot'
 import Title from './ui/Title'
 import Hud from './ui/Hud'
-import RoomPanel from './ui/RoomPanel'
 import Plain from './ui/Plain'
 
 function hasWebGL() {
@@ -50,7 +49,6 @@ export default function App() {
       {phase === 'boot' && <Boot />}
       <Title />
       <Hud />
-      <RoomPanel />
     </>
   )
 }
