@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Material inspector</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #ccc;
+        font: 12px ui-monospace, monospace;
+        padding: 16px;
+      }
+      h2 {
+        font-size: 12px;
+        letter-spacing: 0.2em;
+        margin: 22px 0 8px;
+        color: #8fa;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      figure {
+        margin: 0;
+      }
+      figcaption {
+        color: #777;
+        padding-top: 4px;
+      }
+      canvas {
+        image-rendering: pixelated;
+        border: 1px solid #333;
+      }
+    </style>
+  </head>
+  <body>
+    <p>
+      Dev-only page. Bakes every procedural material and shows its albedo, normal and
+      roughness/metalness maps at 1:1 so they can be judged without walking the corridor.
+      Not part of the production build — <code>vite build</code> only bundles index.html.
+    </p>
+    <div id="out"></div>
+    <script type="module" src="/src/texcheck.js"></script>
+  </body>
+</html>
