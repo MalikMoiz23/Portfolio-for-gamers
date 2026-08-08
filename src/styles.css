@@ -468,13 +468,18 @@ canvas {
   color: var(--ink-dim);
 }
 
+/* Sits over whatever the torch is lighting, which can be a near-white door.
+   Needs its own ground, not just a text-shadow. */
 .prompt-cta {
+  display: inline-block;
   margin-top: 10px;
+  padding: 6px 12px;
+  background: rgba(4, 6, 5, 0.86);
+  border: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 10px;
-  letter-spacing: 0.26em;
-  color: #b6bdb4;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.95);
+  letter-spacing: 0.24em;
+  color: #d5dad3;
   animation: pulse 1.9s ease-in-out infinite;
 }
 

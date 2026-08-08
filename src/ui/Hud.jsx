@@ -101,7 +101,7 @@ export default function Hud() {
       {walking && (
         <div className={`hint ${hintSeen ? 'hint-dim' : ''}`} ref={hint}>
           <span>SCROLL</span> walk · <span>SHIFT</span> run · <span>A D</span> step aside ·{' '}
-          <span>STOP AT A DOOR</span> to open it
+          <span>CLICK A DOOR</span> to go in
         </div>
       )}
 
@@ -113,7 +113,7 @@ export default function Hud() {
             </span>
             <span className="prompt-sub">{room.subtitle}</span>
           </div>
-          <div className="prompt-cta">{near >= 0 ? 'OPENING — HOLD STILL' : 'CLICK, OR WALK UP TO IT'}</div>
+          <div className="prompt-cta">CLICK THE DOOR TO OPEN</div>
         </div>
       )}
 

@@ -17,14 +17,34 @@ import { rng } from './scene/util'
  * contact details on a wall would mean nobody could click them.
  * ========================================================================== */
 
-const MONO = '"Courier New", ui-monospace, monospace'
-const SANS = 'system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif'
+/* Courier New was the wrong call — its letterforms are thin, widely spaced and
+ * read as a fax rather than as signage. Consolas and Cascadia are far tighter
+ * and hold up at the sizes these boards use. */
+const MONO = 'Consolas, "Cascadia Mono", "SF Mono", Menlo, "DejaVu Sans Mono", monospace'
+const SANS = '"Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif'
 
-const INK = '#c8cdc6'
-const DIM = '#828981'
-const FAINT = '#5c635b'
+const INK = '#ccd1ca'
+const DIM = '#8a918a'
+const FAINT = '#616861'
 const BG = '#0b0d0c'
-const RULE = '#242926'
+const RULE = '#272c29'
+
+/* Draw the board bigger than it needs to be and let the GPU downsample. Costs
+ * memory, buys crisp type when you walk right up to a board. */
+const SS = 1.5
+
+/* One spacing unit. Every gap below is a multiple of it, so the vertical rhythm
+ * stays consistent instead of being a pile of arbitrary numbers. */
+const U = 8
+
+/* Canvas letter-spacing is Chrome 99+; harmless where it is missing. */
+function tracking(ctx, px) {
+  try {
+    ctx.letterSpacing = `${px}px`
+  } catch {
+    /* older engine, spacing just stays default */
+  }
+}
 
 function wrap(ctx, text, maxW) {
   const words = String(text).split(/\s+/)
@@ -53,56 +73,56 @@ function buildItems(m, room, index, total, W, s) {
   const gap = (h) => push(h * s, () => {})
 
   const F = {
-    title: `bold ${Math.round(58 * s)}px ${MONO}`,
+    title: `bold ${Math.round(60 * s)}px ${MONO}`,
     sub: `${Math.round(23 * s)}px ${SANS}`,
-    eyebrow: `${Math.round(17 * s)}px ${MONO}`,
+    eyebrow: `${Math.round(16 * s)}px ${MONO}`,
     body: `${Math.round(25 * s)}px ${SANS}`,
     bullet: `${Math.round(25 * s)}px ${SANS}`,
-    cardTitle: `bold ${Math.round(26 * s)}px ${MONO}`,
-    cardMeta: `${Math.round(18 * s)}px ${MONO}`,
+    cardTitle: `bold ${Math.round(25 * s)}px ${MONO}`,
+    cardMeta: `${Math.round(17 * s)}px ${MONO}`,
     cardBody: `${Math.round(23 * s)}px ${SANS}`,
-    tag: `${Math.round(17 * s)}px ${MONO}`,
+    tag: `${Math.round(16 * s)}px ${MONO}`,
     barLabel: `${Math.round(24 * s)}px ${SANS}`,
-    when: `${Math.round(18 * s)}px ${MONO}`,
+    when: `${Math.round(17 * s)}px ${MONO}`,
     what: `${Math.round(27 * s)}px ${SANS}`,
     where: `${Math.round(22 * s)}px ${SANS}`,
     small: `${Math.round(22 * s)}px ${SANS}`,
-    linkLabel: `${Math.round(18 * s)}px ${MONO}`,
-    linkValue: `${Math.round(26 * s)}px ${SANS}`,
+    linkLabel: `${Math.round(17 * s)}px ${MONO}`,
+    linkValue: `${Math.round(27 * s)}px ${SANS}`,
   }
-  const LH = Math.round(37 * s)
+  const LH = Math.round(36 * s)
 
   /* header, first column only */
-  push(Math.round(24 * s), (c, x, y) => {
+  push(U * 3 * s, (c, x, y) => {
     c.font = F.eyebrow
     c.fillStyle = FAINT
-    c.fillText(
-      `ROOM ${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
-      x,
-      y + 17 * s,
-    )
+    tracking(c, 3 * s)
+    c.fillText(`ROOM ${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`, x, y + 16 * s)
+    tracking(c, 0)
   })
-  gap(16)
-  push(Math.round(62 * s), (c, x, y) => {
+  gap(U * 2.5)
+  push(66 * s, (c, x, y) => {
     c.font = F.title
     c.fillStyle = room.accent
-    c.fillText(room.title, x, y + 52 * s)
+    tracking(c, 4 * s)
+    c.fillText(room.title, x, y + 54 * s)
+    tracking(c, 0)
   })
   if (room.subtitle) {
-    push(Math.round(32 * s), (c, x, y) => {
+    push(U * 4 * s, (c, x, y) => {
       c.font = F.sub
       c.fillStyle = DIM
       c.fillText(room.subtitle, x, y + 24 * s)
     })
   }
-  gap(10)
-  push(Math.round(18 * s), (c, x, y) => {
+  gap(U * 1.5)
+  push(U * 2 * s, (c, x, y) => {
     c.fillStyle = room.accent
-    c.globalAlpha = 0.8
-    c.fillRect(x, y + 8 * s, 74 * s, 2 * s)
+    c.globalAlpha = 0.85
+    c.fillRect(x, y + U * s, 78 * s, 2 * s)
     c.globalAlpha = 1
   })
-  gap(22)
+  gap(U * 3)
 
   for (const b of room.blocks ?? []) {
     switch (b.kind) {
@@ -143,77 +163,86 @@ function buildItems(m, room, index, total, W, s) {
       case 'cards': {
         for (const card of b.items ?? []) {
           m.font = F.cardBody
-          const bodyLines = card.body ? wrap(m, card.body, W - 34 * s) : []
-          const padY = 18 * s
+          const padX = U * 3 * s
+          const padY = U * 2.75 * s
+          const bodyLines = card.body ? wrap(m, card.body, W - padX * 2) : []
           const h =
             padY * 2 +
-            32 * s +
+            30 * s +
             bodyLines.length * (30 * s) +
-            (card.tags?.length ? 34 * s : 0) +
-            (card.href ? 26 * s : 0)
+            (card.tags?.length ? U * 5 * s : 0) +
+            (card.href ? U * 4 * s : 0)
           push(h, (c, x, y) => {
+            c.fillStyle = 'rgba(255,255,255,0.022)'
             c.strokeStyle = RULE
             c.lineWidth = 1
-            c.fillStyle = 'rgba(255,255,255,0.018)'
-            c.fillRect(x, y, W, h)
-            c.strokeRect(x + 0.5, y + 0.5, W - 1, h - 1)
-            // accent spine
+            c.beginPath()
+            c.roundRect(x + 0.5, y + 0.5, W - 1, h - 1, 3 * s)
+            c.fill()
+            c.stroke()
+            // accent spine down the left edge
             c.fillStyle = room.accent
-            c.globalAlpha = 0.75
-            c.fillRect(x, y, 3 * s, h)
+            c.globalAlpha = 0.8
+            c.fillRect(x, y + 2 * s, 3 * s, h - 4 * s)
             c.globalAlpha = 1
 
-            let yy = y + padY + 24 * s
+            let yy = y + padY + 22 * s
             c.font = F.cardTitle
             c.fillStyle = INK
-            c.fillText(card.title ?? '', x + 20 * s, yy)
+            tracking(c, 1 * s)
+            c.fillText(card.title ?? '', x + padX, yy)
+            tracking(c, 0)
             if (card.meta) {
               c.font = F.cardMeta
               c.fillStyle = FAINT
               c.textAlign = 'right'
-              c.fillText(card.meta, x + W - 18 * s, yy)
+              c.fillText(card.meta, x + W - padX, yy)
               c.textAlign = 'left'
             }
-            yy += 12 * s
             c.font = F.cardBody
             c.fillStyle = DIM
             bodyLines.forEach((l) => {
               yy += 30 * s
-              c.fillText(l, x + 20 * s, yy)
+              c.fillText(l, x + padX, yy)
             })
             if (card.tags?.length) {
-              yy += 30 * s
+              yy += U * 4.5 * s
               c.font = F.tag
-              let tx = x + 20 * s
+              let tx = x + padX
               for (const tag of card.tags) {
-                const tw = c.measureText(tag).width + 16 * s
-                c.strokeStyle = room.accent
-                c.globalAlpha = 0.45
-                c.strokeRect(tx, yy - 15 * s, tw, 22 * s)
+                const tw = c.measureText(tag).width + U * 2.5 * s
+                c.fillStyle = room.accent
+                c.globalAlpha = 0.13
+                c.beginPath()
+                c.roundRect(tx, yy - 15 * s, tw, 23 * s, 2.5 * s)
+                c.fill()
                 c.globalAlpha = 1
                 c.fillStyle = room.accent
-                c.fillText(tag, tx + 8 * s, yy)
-                tx += tw + 8 * s
+                c.fillText(tag, tx + U * 1.25 * s, yy)
+                tx += tw + U * s
               }
             }
             if (card.href) {
-              yy += 24 * s
+              yy += U * 3.75 * s
               c.font = F.cardMeta
               c.fillStyle = FAINT
-              c.fillText('OPEN →', x + 20 * s, yy)
+              tracking(c, 2 * s)
+              c.fillText('OPEN', x + padX, yy)
+              tracking(c, 0)
+              c.fillText('→', x + padX + c.measureText('OPEN').width + U * 2 * s, yy)
             }
           })
           if (card.href) items[items.length - 1].href = card.href
-          gap(14)
+          gap(U * 1.75)
         }
-        gap(8)
+        gap(U)
         break
       }
 
       case 'bars': {
         for (const bar of b.items ?? []) {
           const v = Math.max(0, Math.min(100, bar.value ?? 0))
-          push(52 * s, (c, x, y) => {
+          push(U * 6.5 * s, (c, x, y) => {
             c.font = F.barLabel
             c.fillStyle = INK
             c.fillText(bar.label ?? '', x, y + 22 * s)
@@ -222,17 +251,22 @@ function buildItems(m, room, index, total, W, s) {
             c.textAlign = 'right'
             c.fillText(String(v), x + W, y + 22 * s)
             c.textAlign = 'left'
-            const trackY = y + 36 * s
+            const trackY = y + U * 4.5 * s
+            const th = 5 * s
             c.fillStyle = '#1b201d'
-            c.fillRect(x, trackY, W, 4 * s)
+            c.beginPath()
+            c.roundRect(x, trackY, W, th, th / 2)
+            c.fill()
             c.fillStyle = room.accent
-            c.globalAlpha = 0.9
-            c.fillRect(x, trackY, W * (v / 100), 4 * s)
+            c.globalAlpha = 0.92
+            c.beginPath()
+            c.roundRect(x, trackY, Math.max(th, W * (v / 100)), th, th / 2)
+            c.fill()
             c.globalAlpha = 1
           })
-          gap(12)
+          gap(U * 1.5)
         }
-        gap(14)
+        gap(U * 2)
         break
       }
 
@@ -270,21 +304,28 @@ function buildItems(m, room, index, total, W, s) {
 
       case 'links': {
         for (const l of b.items ?? []) {
-          const h = 54 * s
+          const h = U * 8 * s
           push(h, (c, x, y) => {
             c.font = F.linkLabel
             c.fillStyle = FAINT
-            c.fillText(String(l.label ?? '').toUpperCase(), x, y + 20 * s)
+            tracking(c, 2.5 * s)
+            c.fillText(String(l.label ?? '').toUpperCase(), x, y + 19 * s)
+            tracking(c, 0)
             c.font = F.linkValue
             c.fillStyle = room.accent
-            c.fillText(l.value ?? '', x, y + 48 * s)
+            c.fillText(l.value ?? '', x, y + U * 6.25 * s)
+            // underline only under the value, so it reads as a link
+            const vw = c.measureText(l.value ?? '').width
+            c.globalAlpha = 0.3
+            c.fillRect(x, y + U * 6.9 * s, vw, 1 * s)
+            c.globalAlpha = 1
             c.fillStyle = RULE
             c.fillRect(x, y + h - 1, W, 1)
           })
           if (l.href) items[items.length - 1].href = l.href
-          gap(12)
+          gap(U * 1.5)
         }
-        gap(10)
+        gap(U * 1.5)
         break
       }
 
@@ -313,11 +354,13 @@ function pack(items, colH) {
 
 /* ---- rendering ----------------------------------------------------------- */
 
-function paint(col, { w, h, pad, accent, seed }) {
+function paint(col, { w, h, pad, accent, seed, page, pages }) {
   const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
+  c.width = Math.round(w * SS)
+  c.height = Math.round(h * SS)
   const ctx = c.getContext('2d')
+  // draw in layout units and let the extra pixels do their job unnoticed
+  ctx.scale(SS, SS)
 
   ctx.fillStyle = BG
   ctx.fillRect(0, 0, w, h)
@@ -340,6 +383,19 @@ function paint(col, { w, h, pad, accent, seed }) {
   ctx.textAlign = 'left'
   for (const it of col) it.draw(ctx, pad, pad + it.y)
 
+  // footer rule and sheet number, so a multi-board wall reads as a set
+  ctx.fillStyle = RULE
+  ctx.fillRect(pad, h - pad + U * 1.5, w - pad * 2, 1)
+  if (pages > 1) {
+    ctx.font = `15px ${MONO}`
+    ctx.fillStyle = FAINT
+    tracking(ctx, 2)
+    ctx.textAlign = 'right'
+    ctx.fillText(`${page + 1} / ${pages}`, w - pad, h - pad + U * 4.5)
+    ctx.textAlign = 'left'
+    tracking(ctx, 0)
+  }
+
   // grime creeping in from the edges
   const g = ctx.createRadialGradient(w / 2, h / 2, h * 0.28, w / 2, h / 2, h * 0.78)
   g.addColorStop(0, 'rgba(0,0,0,0)')
@@ -350,6 +406,8 @@ function paint(col, { w, h, pad, accent, seed }) {
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = THREE.SRGBColorSpace
   t.anisotropy = 8
+  t.generateMipmaps = true
+  t.minFilter = THREE.LinearMipmapLinearFilter
   t.needsUpdate = true
   return t
 }
@@ -363,7 +421,7 @@ const LAYOUTS = [
   { cols: 3, w: 700, h: 1150 },
 ]
 
-const PAD = 48
+const PAD = 54
 const MAX_GROW = 2.3
 
 function usedHeight(packed) {
@@ -425,8 +483,17 @@ export function makeRoomBoards(room, index, total) {
     h = Math.max(Math.round(w / 1.62), Math.min(layout.h, wanted))
   }
 
-  return packed.slice(0, layout.cols).map((col, i) => ({
-    texture: paint(col, { w, h, pad: PAD, accent: room.accent, seed: 900 + index * 31 + i }),
+  const sheets = packed.slice(0, layout.cols)
+  return sheets.map((col, i) => ({
+    texture: paint(col, {
+      w,
+      h,
+      pad: PAD,
+      accent: room.accent,
+      seed: 900 + index * 31 + i,
+      page: i,
+      pages: sheets.length,
+    }),
     w,
     h,
     hotspots: col

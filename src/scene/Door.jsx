@@ -35,7 +35,11 @@ export default function Door({ door }) {
       back: planeUV(B.doorW, B.doorH, d),
       plate: new THREE.PlaneGeometry(0.66, 0.17),
       bleed: new THREE.PlaneGeometry(B.doorW - 0.06, 0.05),
-      hit: new THREE.PlaneGeometry(B.doorW + 0.2, B.doorH),
+      /* Exactly the door leaf, nothing more. It used to overhang the opening by
+       * 200mm, so clicks on the surrounding wall counted. The name plate above
+       * the door is a separate mesh with no handler and is deliberately not
+       * part of this — the only thing that opens a room is the door. */
+      hit: new THREE.PlaneGeometry(B.doorW - 0.02, B.doorH - 0.02),
       sill: boxUV(B.recess, 0.03, B.doorW, 2),
     }
   }, [])
@@ -200,10 +204,10 @@ export default function Door({ door }) {
         />
       )}
 
-      {/* invisible click target covering the whole doorway */}
+      {/* invisible click target, sitting in the plane of the doorway */}
       <mesh
         geometry={geo.hit}
-        position={[wallX - side * 0.05, B.doorH / 2, 0]}
+        position={[wallX - side * 0.02, B.doorH / 2, 0]}
         rotation={[0, faceRot, 0]}
         onPointerOver={over}
         onPointerOut={out}

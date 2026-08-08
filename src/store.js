@@ -81,5 +81,5 @@ export const nav = {
  *   __portfolio.set({ phase: 'entering', activeRoom: 2 })
  * Stripped from production builds. */
 if (import.meta.env.DEV && typeof window !== 'undefined') {
-  window.__portfolio = { state, set, nav }
+  window.__portfolio = { state, set, nav, audio }
 }

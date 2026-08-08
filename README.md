@@ -153,27 +153,52 @@ Stripped from production builds.
 | `Shift`                    | Run                                                     |
 | `A` `D` / swipe sideways   | Step across the corridor                                |
 | Move mouse                 | Look                                                    |
-| **Stop beside a door**     | It unlatches and swings open on its own                 |
-| Click a door               | Same, from further away                                 |
+| Walk up to a door          | You turn to face it and it lights up — nothing more     |
+| **Click the door**         | The only way into a room                                |
 | `Esc`                      | Leave the room                                          |
 
-### Why the door does not open every time you pass one
+### Doors only open when clicked
 
-Proximity alone would make the corridor impossible — the trigger radius is 2.4 m and the
-doors are 8.6 m apart, so more than half the hallway would be a trap and you could never
-reach the last room. It also requires you to have **slowed down** beside the door, and holds
-that state for a third of a second before firing. Run past and nothing happens; stop and it
-opens. On the way out, the door you just left is suppressed until you are 4.6 m clear of it,
-otherwise you would be pulled straight back in.
+Coming alongside a door turns the camera to face it, brightens its name plate and shows a
+prompt. It does **not** open it. Rooms are entered by clicking the door and nothing else:
+`enterRoom()` has exactly one caller, the click handler in `Door.jsx`.
+
+The click target is the door leaf itself, sized to the opening. The name plate above the door
+is a separate mesh with no handler, so it cannot be clicked into a room, and the HUD sits
+under `pointer-events: none` except for its own buttons.
 
 ### Sound
 
 Everything is synthesised at runtime and fed through a procedurally generated convolution
 reverb, which is most of what makes it sound like a corridor rather than a set of beeps.
-The bed is a sub drone, a detuned pad on a slow filter sweep, ventilation hiss, a heartbeat,
-and randomly scheduled knocks, metal groans and whispers. Footsteps change character between
-walking and running — harder strike, longer stride, grit kicked forward — and running adds
-breathing on alternate strides.
+
+**The bed is deliberately almost silent.** Most of the time you hear room tone and air
+movement and nothing else. The dissonant cluster sits at a level you cannot really pick out,
+and only swells as you close on a door — measured at −19.8 dB at rest against −14.6 dB
+standing beside one. Your pulse only starts when there is something to have a pulse about.
+
+Events — knocks, metal groans, scrapes, whispers, a detuned music-box bell, someone crying a
+long way off — are scheduled 34 to 150 seconds apart, averaging one every thirteen seconds or
+so. **The gaps are the point.** An earlier version ran seven schedulers at five-to-fifteen
+seconds each, which worked out at something happening every two seconds; that is not an
+abandoned building, it is a haunted house ride, and a drone that never stops is a fatiguing
+hum rather than dread.
+
+Footsteps change character between walking and running, and running adds breathing on
+alternate strides. Everything that comes from elsewhere in the building is panned off-centre;
+the bed ducks under the loud events so they cut through.
+
+**Two things worth knowing before you touch `audio.js`:**
+
+- **Put the weight where speakers work.** The first version of the bed lived entirely between
+  36 and 73 Hz on sine and triangle waves. On monitors that is a wall of dread; on the laptop
+  and phone speakers people actually use — which roll off below roughly 150 Hz — it is
+  silence. Use sawtooths and let the *harmonics* in the 200 Hz–3 kHz band carry it. There is a
+  metering tap on the master bus (`getAnalyser()`) so this can be measured rather than
+  guessed at.
+- **Formants are what make something sound human.** The crying is a sawtooth — a vocal-fold
+  buzz — pushed through three parallel bandpass filters tuned to the first three formants of
+  a mid-open vowel. Filtered noise never reads as a person no matter how you shape it.
 
 Sound is off until you ask for it. Browsers block audio without a gesture, and a portfolio
 that makes noise unprompted is a portfolio people close.
