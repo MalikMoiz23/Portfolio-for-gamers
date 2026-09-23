@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { B, DOORS, MAX_POS, cameraZ } from '../layout'
-import { nav, state, set, leaveRoom } from '../store'
+import { B, DOORS, MAX_POS, SEAT, standDepth, cameraZ } from '../layout'
+import { nav, state, set, leaveRoom, standUp } from '../store'
 import { clamp, clamp01, damp, easeInOut, lerp, smootherstep } from './util'
 import * as audio from '../audio'
 
@@ -80,9 +80,13 @@ export default function Rig() {
       touch = null
     }
 
+    /* Escape unwinds one step at a time: out of the chair first, out of the
+     * room second. Leaving straight from a seated camera skipped the stand-up
+     * move and teleported you into the corridor. */
     const onKeyDown = (e) => {
       if (e.key === 'Escape') {
-        leaveRoom()
+        if (state.seated) standUp()
+        else leaveRoom()
         return
       }
       keys.current.add(e.key.toLowerCase())
@@ -91,12 +95,27 @@ export default function Rig() {
     const onKeyUp = (e) => keys.current.delete(e.key.toLowerCase())
     const onBlur = () => keys.current.clear()
 
+    /* Inside a room the camera stops on the centre line facing the boards, so
+     * the head turn is the only way to see the side walls — and the side walls
+     * are where the dressing is. At 0.5 rad the desk in the ABOUT room sat
+     * permanently off-frame. 1.0 rad plus the ~50° half-FOV reaches past 90°,
+     * which is what it takes to look at something standing beside you. */
+    /* Seated, the head is locked. The mouse both aims the view and places the
+     * cursor, so any head-turn at all drags the screen out from under the
+     * pointer: at 0.3 rad the panel slid 0.42m at arm's length — wider than a
+     * desktop icon — and reaching for one moved it away. You are sitting
+     * looking at a monitor; stand up to look around the room. */
     const onPointerMove = (e) => {
       const nx = (e.clientX / window.innerWidth) * 2 - 1
       const ny = (e.clientY / window.innerHeight) * 2 - 1
-      const range = state.phase === 'inside' ? 0.5 : 0.2
+      if (state.seated) {
+        targetLook.current.x = 0
+        targetLook.current.y = 0
+        return
+      }
+      const range = state.phase === 'inside' ? 1.0 : 0.2
       targetLook.current.x = -nx * range
-      targetLook.current.y = clamp(-ny * range * 0.6, -0.32, 0.32)
+      targetLook.current.y = clamp(-ny * range * 0.45, -0.4, 0.4)
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -123,6 +142,14 @@ export default function Rig() {
     const dt = Math.min(rawDt, 1 / 12)
     const t = s.clock.elapsedTime
     const phase = state.phase
+
+    /* The building's lights. Advanced here, before anything reads it, because
+     * Rig is the first useFrame in the tree and is the only one that runs no
+     * matter which room is mounted. */
+    nav.lit = damp(nav.lit, state.lightsOn ? 1 : 0, 3.4, dt)
+    // sitting down and getting up again
+    nav.sitT = damp(nav.sitT, state.seated ? 1 : 0, 4.2, dt)
+
     const k = keys.current
     const holdingRun = k.has('shift')
 
@@ -205,7 +232,11 @@ export default function Rig() {
     if (door) {
       const e = smootherstep(clamp01((nav.roomT - 0.3) / 0.7))
       const p1 = door.side * (B.width / 2 + B.recess)
-      const p2 = door.side * (B.width / 2 + B.recess + B.roomD * 0.66)
+      /* Sitting only moves you deeper into the room and lower — the yaw is
+       * already facing the far wall, which is exactly where the desk is, so
+       * there is no turn to blend. */
+      const deep = lerp(B.roomD * standDepth(door.room), SEAT.x, nav.sitT)
+      const p2 = door.side * (B.width / 2 + B.recess + deep)
       const from = lateralAtEnter.current
       x = from * (1 - e) * (1 - e) + 2 * (1 - e) * e * p1 + e * e * p2
       yaw = smootherstep(clamp01((nav.roomT - 0.22) / 0.78)) * ((-door.side * Math.PI) / 2)
@@ -237,7 +268,8 @@ export default function Rig() {
     const gait = clamp01(nav.speed / (sprinting ? 6 : 2.4))
     // the walk through a doorway is a scripted move, not you walking — let the
     // bob fall away as it takes over, or the arrival wobbles
-    const scripted = 1 - nav.roomT * 0.85
+    // sitting is not walking: kill what is left of the head bob entirely
+    const scripted = (1 - nav.roomT * 0.85) * (1 - nav.sitT)
     const amp = ((sprinting ? 0.03 : 0.012) + gait * (sprinting ? 0.062 : 0.036)) * scripted
     const bobY = Math.sin(nav.bobPhase) * amp
     const bobX = Math.sin(nav.bobPhase * 0.5) * amp * 0.8
@@ -257,7 +289,8 @@ export default function Rig() {
     if (!sprinting && wasRunning.current) audio.breath(false)
     wasRunning.current = sprinting
 
-    camera.position.set(x + bobX * 0.4, B.eye + bobY + breathe, baseZ)
+    const eye = lerp(B.eye, SEAT.eye, nav.sitT)
+    camera.position.set(x + bobX * 0.4, eye + bobY + breathe, baseZ)
 
     /* ---- close to a door: prompt only, never an automatic entry ---- */
     if (phase === 'walk') {
@@ -274,6 +307,12 @@ export default function Rig() {
     }
 
     /* ---- look ---- */
+    // sitting down without touching the mouse would otherwise keep whatever
+    // head-turn you were standing with, leaving the screen off to one side
+    if (state.seated) {
+      targetLook.current.x = 0
+      targetLook.current.y = 0
+    }
     nav.lookX = damp(nav.lookX, targetLook.current.x, LOOK_DAMP, dt)
     nav.lookY = damp(nav.lookY, targetLook.current.y, LOOK_DAMP, dt)
     camera.rotation.y = yaw + nav.lookX

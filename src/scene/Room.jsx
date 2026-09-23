@@ -8,6 +8,8 @@ import { planeUV, boxUV, rng, damp } from './util'
 import { makeSign } from '../textures'
 import { makeRoomBoards } from '../board'
 import { nav } from '../store'
+import AboutRoom from './AboutRoom'
+import ProjectsRoom from './ProjectsRoom'
 
 const D = 0.42
 
@@ -303,15 +305,53 @@ function ExitFittings({ accent }) {
   )
 }
 
+/* ---- neon trim, fitted to every room ------------------------------------- *
+ * Thin emissive channels where the walls meet the ceiling and a line along the
+ * floor. They are unlit geometry, not lights — four extra point lights per room
+ * would cost a full shading pass each, and the bulb and the picture light are
+ * already doing the actual illuminating. Two low-distance points at the corners
+ * are enough to sell the bounce. */
+function NeonTrim({ accent }) {
+  const strips = useMemo(
+    () => [
+      // along both side walls, just under the ceiling
+      { pos: [B.roomD / 2, B.roomH - 0.09, -B.roomW / 2 + 0.012], rot: [0, 0, 0], size: [B.roomD - 0.3, 0.022] },
+      { pos: [B.roomD / 2, B.roomH - 0.09, B.roomW / 2 - 0.012], rot: [0, Math.PI, 0], size: [B.roomD - 0.3, 0.022] },
+      // across the far wall, above the boards
+      { pos: [B.roomD - 0.012, B.roomH - 0.09, 0], rot: [0, -Math.PI / 2, 0], size: [B.roomW - 0.3, 0.022] },
+      // and a line at the skirting, which is what puts colour on the floor
+      { pos: [B.roomD / 2, 0.035, -B.roomW / 2 + 0.014], rot: [0, 0, 0], size: [B.roomD - 0.5, 0.014] },
+      { pos: [B.roomD / 2, 0.035, B.roomW / 2 - 0.014], rot: [0, Math.PI, 0], size: [B.roomD - 0.5, 0.014] },
+    ],
+    [],
+  )
+
+  const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: accent, toneMapped: false }), [accent])
+  const pulse = useRef()
+
+  useFrame((s) => {
+    // a slow breath, so the trim is not a dead decal
+    const k = 0.78 + Math.sin(s.clock.elapsedTime * 0.9) * 0.12
+    mat.color.set(accent).multiplyScalar(k * 1.35)
+    if (pulse.current) pulse.current.intensity = 2.1 * k
+  })
+
+  return (
+    <group>
+      {strips.map((s, i) => (
+        <mesh key={i} position={s.pos} rotation={s.rot} material={mat}>
+          <planeGeometry args={s.size} />
+        </mesh>
+      ))}
+      <pointLight ref={pulse} position={[B.roomD - 0.5, B.roomH - 0.3, 0]} color={accent} intensity={2.1} distance={6} decay={2} />
+    </group>
+  )
+}
+
+/* ABOUT and PROJECTS are not in here — they build their own rooms in
+ * AboutRoom.jsx and ProjectsRoom.jsx and never reach this switch. */
 function Dressing({ room }) {
   switch (room.id) {
-    case 'projects':
-      return (
-        <>
-          <Shelves />
-          <Desk />
-        </>
-      )
     case 'skills':
       return <Shelves />
     case 'experience':
@@ -325,7 +365,11 @@ function Dressing({ room }) {
 
 /* ---- the room, mounted only while you are in it -------------------------- */
 
-export default function Room({ door }) {
+/* `warm` marks the warmup pass: the room is mounted only so its materials get
+ * rendered once and their shaders compiled while the loading screen is still
+ * up. It has to be VISIBLE for that — three skips invisible objects — so it
+ * overrides the roomT gate below. */
+export default function Room({ door, warm = false }) {
   const { side, z, room, index } = door
   const grp = useRef()
 
@@ -333,14 +377,27 @@ export default function Room({ door }) {
   const originX = side * (B.width / 2 + B.recess)
 
   useFrame(() => {
-    if (grp.current) grp.current.visible = nav.roomT > 0.001
+    if (grp.current) grp.current.visible = warm || nav.roomT > 0.001
   })
+
+  /* The finished rooms share none of the fabric below — their own shell, their
+   * own lighting, their own way of carrying content. Everything still in the
+   * switch further down is the original concrete cell with things hung on the
+   * walls. */
+  if (room.id === 'about' || room.id === 'projects') {
+    return (
+      <group ref={grp} position={[originX, 0, z]} rotation={[0, rot, 0]}>
+        {room.id === 'about' ? <AboutRoom room={room} /> : <ProjectsRoom room={room} />}
+      </group>
+    )
+  }
 
   return (
     <group ref={grp} position={[originX, 0, z]} rotation={[0, rot, 0]}>
       <Shell />
       <Boards room={room} index={index} />
       <SideStencil room={room} />
+      <NeonTrim accent={room.accent} />
       <Dressing room={room} />
       <Bulb accent={room.accent} x={B.roomD * 0.34} z={0} power={13} />
       {/* wash across the board wall, from above and behind you */}
@@ -354,9 +411,16 @@ export default function Room({ door }) {
         decay={1.7}
         color="#cfd9e6"
       />
-      <pointLight position={[1.2, 2.1, 1.8]} color={room.accent} intensity={2.2} distance={7} decay={2} />
-      <pointLight position={[1.2, 2.1, -1.8]} color={room.accent} intensity={1.6} distance={7} decay={2} />
-      <ambientLight intensity={0.09} color={room.accent} />
+      {/* Accent fill from the corners. Pushed well past the old values because
+          the room now has neon trim to justify it — under-lit accent light just
+          reads as a colour cast rather than as anything glowing. */}
+      <pointLight position={[1.2, 2.1, 1.8]} color={room.accent} intensity={4.4} distance={8} decay={2} />
+      <pointLight position={[1.2, 2.1, -1.8]} color={room.accent} intensity={3.2} distance={8} decay={2} />
+      {/* A cold counter-light opposite the accent, so the shadows are not just
+          a darker version of the key. Complementary lighting is most of why a
+          coloured room reads as lit rather than as tinted. */}
+      <pointLight position={[B.roomD - 1.0, 0.9, B.roomW * 0.32]} color="#2b6bff" intensity={2.6} distance={7} decay={2} />
+      <ambientLight intensity={0.16} color={room.accent} />
     </group>
   )
 }
