@@ -148,9 +148,11 @@ export default function Flashlight() {
         shadow-bias={-0.0009}
         shadow-normalBias={0.022}
       />
-      <spotLight ref={wide} angle={1.0} penumbra={1} intensity={16} distance={17} decay={1.8} color="#aec2dc" />
+      {/* The wide spot is gone. Three lights for one torch is three full
+          shading passes over everything it touches; the main cone was widened
+          and the fill raised to cover what it was doing. */}
       {/* a little spill so the walls beside you are not pitch black */}
-      <pointLight ref={fill} intensity={1.7} distance={6} decay={2} color="#9fb4cc" />
+      <pointLight ref={fill} intensity={3.1} distance={8} decay={2} color="#9fb4cc" />
       {!lowSpec &&
         HAZE.map(([, radius], i) => (
           <mesh
