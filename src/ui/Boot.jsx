@@ -6,7 +6,10 @@ import { useStore } from '../store'
 export default function Boot() {
   const progress = useStore((s) => s.progress)
   const label = useStore((s) => s.progressLabel)
+  const phase = useStore((s) => s.phase)
   const pct = Math.round(progress * 100)
+  // the bake is finished by now; what is left is compiling shaders
+  const status = phase === 'warming' ? 'Warming up the lights' : label || 'Waking up'
 
   return (
     <div className="boot">
@@ -17,7 +20,7 @@ export default function Boot() {
           <div className="boot-bar-fill" style={{ width: `${pct}%` }} />
         </div>
         <div className="boot-status">
-          <span>{label || 'Waking up'}</span>
+          <span>{status}</span>
           <span>{String(pct).padStart(3, '0')}%</span>
         </div>
       </div>

@@ -23,6 +23,9 @@ desktop.ini
 .vscode/*
 !.vscode/extensions.json
 
+# local scratch scripts (screenshot runners, one-off probes)
+_*.mjs
+
 # logs
 *.log
 npm-debug.log*

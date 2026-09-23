@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { rng } from './scene/util'
+import { grain } from './canvasfx'
 
 /* ============================================================================
  * WALL BOARDS
@@ -23,11 +24,14 @@ import { rng } from './scene/util'
 const MONO = 'Consolas, "Cascadia Mono", "SF Mono", Menlo, "DejaVu Sans Mono", monospace'
 const SANS = '"Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif'
 
-const INK = '#ccd1ca'
-const DIM = '#8a918a'
-const FAINT = '#616861'
-const BG = '#0b0d0c'
-const RULE = '#272c29'
+/* Cool greys rather than the old green-greys: the boards now hang in rooms lit
+ * by saturated neon, and a warm-neutral sheet under a cyan strip reads as
+ * yellowed paper rather than as a printed panel. */
+const INK = '#d8dfea'
+const DIM = '#96a3b6'
+const FAINT = '#6a7689'
+const BG = '#080a10'
+const RULE = '#222939'
 
 /* Draw the board bigger than it needs to be and let the GPU downsample. Costs
  * memory, buys crisp type when you walk right up to a board. */
@@ -67,7 +71,7 @@ function wrap(ctx, text, maxW) {
 
 /* Every item knows its own height and how to draw itself at a given y. Keeping
  * them atomic is what stops a card being sliced in half across two boards. */
-function buildItems(m, room, index, total, W, s) {
+function buildItems(m, room, index, total, W, s, head = null) {
   const items = []
   const push = (h, draw) => items.push({ h, draw })
   const gap = (h) => push(h * s, () => {})
@@ -92,12 +96,15 @@ function buildItems(m, room, index, total, W, s) {
   }
   const LH = Math.round(36 * s)
 
-  /* header, first column only */
+  /* header, first column only. `head.eyebrow` lets a paged board label itself
+   * by panel instead of by room. */
+  const eyebrow =
+    head?.eyebrow ?? `ROOM ${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`
   push(U * 3 * s, (c, x, y) => {
     c.font = F.eyebrow
     c.fillStyle = FAINT
     tracking(c, 3 * s)
-    c.fillText(`ROOM ${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`, x, y + 16 * s)
+    c.fillText(eyebrow, x, y + 16 * s)
     tracking(c, 0)
   })
   gap(U * 2.5)
@@ -173,8 +180,13 @@ function buildItems(m, room, index, total, W, s) {
             (card.tags?.length ? U * 5 * s : 0) +
             (card.href ? U * 4 * s : 0)
           push(h, (c, x, y) => {
-            c.fillStyle = 'rgba(255,255,255,0.022)'
-            c.strokeStyle = RULE
+            // the card body picks up a little of the accent so it lifts off the
+            // sheet without needing a border heavy enough to fight the type
+            const cg = c.createLinearGradient(x, y, x + W * 0.7, y + h)
+            cg.addColorStop(0, `${room.accent}1c`)
+            cg.addColorStop(1, 'rgba(255,255,255,0.018)')
+            c.fillStyle = cg
+            c.strokeStyle = `${room.accent}33`
             c.lineWidth = 1
             c.beginPath()
             c.roundRect(x + 0.5, y + 0.5, W - 1, h - 1, 3 * s)
@@ -182,9 +194,7 @@ function buildItems(m, room, index, total, W, s) {
             c.stroke()
             // accent spine down the left edge
             c.fillStyle = room.accent
-            c.globalAlpha = 0.8
-            c.fillRect(x, y + 2 * s, 3 * s, h - 4 * s)
-            c.globalAlpha = 1
+            c.fillRect(x, y + 2 * s, 3.5 * s, h - 4 * s)
 
             let yy = y + padY + 22 * s
             c.font = F.cardTitle
@@ -252,15 +262,26 @@ function buildItems(m, room, index, total, W, s) {
             c.fillText(String(v), x + W, y + 22 * s)
             c.textAlign = 'left'
             const trackY = y + U * 4.5 * s
-            const th = 5 * s
-            c.fillStyle = '#1b201d'
+            const th = 6 * s
+            const fw = Math.max(th, W * (v / 100))
+            c.fillStyle = '#151a26'
             c.beginPath()
             c.roundRect(x, trackY, W, th, th / 2)
             c.fill()
-            c.fillStyle = room.accent
-            c.globalAlpha = 0.92
+            // the fill ramps from a dim accent to the full one, so the bar has
+            // a direction instead of being a flat coloured slab
+            const gr = c.createLinearGradient(x, 0, x + fw, 0)
+            gr.addColorStop(0, `${room.accent}66`)
+            gr.addColorStop(1, room.accent)
+            c.fillStyle = gr
             c.beginPath()
-            c.roundRect(x, trackY, Math.max(th, W * (v / 100)), th, th / 2)
+            c.roundRect(x, trackY, fw, th, th / 2)
+            c.fill()
+            // a bright cap where it stops, which is where the eye lands
+            c.fillStyle = '#ffffff'
+            c.globalAlpha = 0.5
+            c.beginPath()
+            c.arc(x + fw - th / 2, trackY + th / 2, th * 0.28, 0, Math.PI * 2)
             c.fill()
             c.globalAlpha = 1
           })
@@ -365,19 +386,32 @@ function paint(col, { w, h, pad, accent, seed, page, pages }) {
   ctx.fillStyle = BG
   ctx.fillRect(0, 0, w, h)
 
-  // paper tooth, so a flat fill does not read as a flat fill
-  const r = rng(seed)
-  for (let i = 0; i < 5200; i++) {
-    ctx.fillStyle = `rgba(255,255,255,${r() * 0.014})`
-    ctx.fillRect(r() * w, r() * h, 1, 1)
-  }
-  for (let i = 0; i < 2600; i++) {
-    ctx.fillStyle = `rgba(0,0,0,${r() * 0.05})`
-    ctx.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 2)
-  }
+  /* A wash of the room's own colour bleeding in from the top-left corner, as if
+   * the neon over the board were falling on it. Eight-digit hex for the alpha:
+   * the accents arrive as plain #rrggbb and this saves parsing them. */
+  const wash = ctx.createRadialGradient(w * 0.12, -h * 0.05, 0, w * 0.12, -h * 0.05, h * 1.05)
+  wash.addColorStop(0, `${accent}2e`)
+  wash.addColorStop(0.45, `${accent}0e`)
+  wash.addColorStop(1, `${accent}00`)
+  ctx.fillStyle = wash
+  ctx.fillRect(0, 0, w, h)
 
-  ctx.fillStyle = accent
-  ctx.fillRect(0, 0, w, 3)
+  /* Paper tooth. This was 7800 individual fillRects per sheet, and with four
+   * sheets it was the single most expensive thing that happened when a door
+   * opened. Two pattern fills draw the same surface. */
+  grain(ctx, w, h, 0.5)
+  grain(ctx, w, h, 0.6, true)
+
+  // the lit edge: solid at the left, fading out, so a row of boards reads as a
+  // single run of light rather than as three separate stripes
+  const edge = ctx.createLinearGradient(0, 0, w, 0)
+  edge.addColorStop(0, accent)
+  edge.addColorStop(0.55, accent)
+  edge.addColorStop(1, `${accent}22`)
+  ctx.fillStyle = edge
+  ctx.fillRect(0, 0, w, 4)
+  ctx.fillStyle = `${accent}3a`
+  ctx.fillRect(0, 4, w, 10)
 
   ctx.textBaseline = 'alphabetic'
   ctx.textAlign = 'left'
@@ -429,6 +463,75 @@ function usedHeight(packed) {
   if (!last || !last.length) return 0
   const item = last[last.length - 1]
   return item.y + item.h
+}
+
+/* ---- paged board --------------------------------------------------------- *
+ * One texture per page, all the same size, for a board that slides between
+ * panels instead of hanging three sheets side by side. Unlike makeRoomBoards
+ * the geometry is fixed and the TYPE moves to fit it: a board on a rail cannot
+ * change shape between panels without the whole thing jumping around.
+ * ------------------------------------------------------------------------- */
+
+const PAGE_W = 1040
+const PAGE_H = 660
+
+export function makeBoardPages(room, pages) {
+  const meas = document.createElement('canvas').getContext('2d')
+  const W = PAGE_W - PAD * 2
+  const H = PAGE_H - PAD * 2
+
+  return pages.map((page, i) => {
+    const sheet = {
+      title: page.title ?? room.title,
+      subtitle: page.subtitle ?? '',
+      accent: room.accent,
+      blocks: page.blocks ?? [],
+    }
+    const head = {
+      eyebrow: `${String(i + 1).padStart(2, '0')} / ${String(pages.length).padStart(2, '0')}  ·  ${room.title}`,
+    }
+    const build = (s) => pack(buildItems(meas, sheet, i, pages.length, W, s, head), H)
+
+    // shrink until the page is one column, then grow back into any slack
+    let scale = 1
+    let packed = build(scale)
+    for (let k = 0; k < 20 && packed.length > 1; k++) {
+      scale *= 0.94
+      packed = build(scale)
+    }
+    for (let k = 0; k < 16; k++) {
+      if (scale >= MAX_GROW || usedHeight(packed) > H * 0.9) break
+      const next = scale * 1.05
+      const p = build(next)
+      if (p.length > 1) break
+      scale = next
+      packed = p
+    }
+
+    const col = packed[0] ?? []
+    return {
+      texture: paint(col, {
+        w: PAGE_W,
+        h: PAGE_H,
+        pad: PAD,
+        accent: room.accent,
+        seed: 1300 + i * 37,
+        page: i,
+        pages: 1, // the board draws its own dots; no printed footer number
+      }),
+      w: PAGE_W,
+      h: PAGE_H,
+      hotspots: col
+        .filter((it) => it.href)
+        .map((it) => ({
+          href: it.href,
+          u: PAD / PAGE_W,
+          v: (PAD + it.y) / PAGE_H,
+          uw: W / PAGE_W,
+          vh: it.h / PAGE_H,
+        })),
+    }
+  })
 }
 
 /* Returns one entry per board: its texture and pixel size, plus any clickable

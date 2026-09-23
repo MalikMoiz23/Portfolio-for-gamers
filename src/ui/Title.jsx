@@ -1,4 +1,4 @@
-import { PROFILE } from '../content'
+import { PROFILE, ROOMS } from '../content'
 import { set, useStore } from '../store'
 import * as audio from '../audio'
 
@@ -23,7 +23,21 @@ export default function Title() {
       <div className="title-inner">
         <h1 className="title-name">{PROFILE.name}</h1>
         <div className="title-rule" />
-        <p className="title-role">{PROFILE.role}</p>
+        <p className="title-role">
+          {PROFILE.role} · {PROFILE.location}
+        </p>
+
+        {/* What is down the hallway, in the order you will meet it. Saying so up
+         * front is the difference between a corridor and a corridor you are
+         * willing to walk down. */}
+        <ul className="title-rooms">
+          {ROOMS.map((r) => (
+            <li key={r.id} style={{ '--accent': r.accent }}>
+              {r.title}
+            </li>
+          ))}
+        </ul>
+
         <p className="title-tag">{PROFILE.tagline}</p>
 
         <div className="title-actions">

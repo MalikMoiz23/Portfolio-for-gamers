@@ -94,17 +94,27 @@ function Block({ block, accent }) {
         </ol>
       )
 
+    /* A links block doubles as a plain fact list — an item without an href is a
+       label and a value, not something to click, so it must not come out as an
+       anchor that goes nowhere. */
     case 'links':
       return (
         <div className="blk-links">
-          {block.items.map((l, i) => (
-            <a key={i} className="link-row" href={l.href} target="_blank" rel="noreferrer noopener">
-              <span className="link-label">{l.label}</span>
-              <span className="link-value" style={{ color: accent }}>
-                {l.value}
-              </span>
-            </a>
-          ))}
+          {block.items.map((l, i) => {
+            const Tag = l.href ? 'a' : 'div'
+            return (
+              <Tag
+                key={i}
+                className="link-row"
+                {...(l.href ? { href: l.href, target: '_blank', rel: 'noreferrer noopener' } : {})}
+              >
+                <span className="link-label">{l.label}</span>
+                <span className="link-value" style={{ color: accent }}>
+                  {l.value}
+                </span>
+              </Tag>
+            )
+          })}
         </div>
       )
 

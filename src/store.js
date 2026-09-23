@@ -8,7 +8,7 @@ import * as audio from './audio'
 const listeners = new Set()
 
 export const state = {
-  phase: 'boot', // boot -> ready -> walk -> entering -> inside -> leaving
+  phase: 'boot', // boot -> warming -> ready -> walk -> entering -> inside -> leaving
   progress: 0, // 0..1 while procedural textures bake
   progressLabel: '',
   activeRoom: -1, // index into ROOMS, -1 when in the corridor
@@ -19,6 +19,10 @@ export const state = {
   running: false,
   lowSpec: false, // dropped by the perf monitor on weak GPUs
   hintSeen: false,
+  lightsOn: false, // the building's lights, and with them the light skin
+  aboutPage: 0, // which panel of the sliding ABOUT board is showing
+  seated: false, // sat at the desk in PROJECTS
+  openProject: -1, // which project window is open on the desktop, -1 = none
 }
 
 export function set(patch) {
@@ -54,11 +58,47 @@ export function enterRoom(index) {
   audio.stinger()
 }
 
-/* Start backing out of whichever room you are standing in. */
+/* Start backing out of whichever room you are standing in. The lights are NOT
+ * reset — there is one switch for the whole building, so walking out of a lit
+ * room into a dark hall would read as the switch having failed. */
 export function leaveRoom() {
   if (state.phase !== 'inside') return
   set({ phase: 'leaving' })
   audio.doorClose()
+}
+
+export function toggleLights() {
+  set({ lightsOn: !state.lightsOn })
+  audio.tick()
+}
+
+/* Sitting down at the desk in PROJECTS. Only from `inside` — being moved into a
+ * chair while the entry walk is still running would fight the rig for the
+ * camera, and both would lose. */
+export function sitDown() {
+  if (state.phase !== 'inside' || state.seated) return
+  set({ seated: true })
+  audio.tick()
+}
+
+export function standUp() {
+  if (!state.seated) return
+  set({ seated: false, openProject: -1 })
+  audio.tick()
+}
+
+export function openProject(index) {
+  if (state.openProject === index) return
+  set({ openProject: index })
+  audio.tick()
+}
+
+/* Paging the ABOUT board. Clamped by the caller, which is the only thing that
+ * knows how many panels there are. */
+export function setAboutPage(index) {
+  if (index === state.aboutPage) return
+  set({ aboutPage: index })
+  audio.tick()
 }
 
 /* Per-frame values. Never put these in React state. */
@@ -74,6 +114,15 @@ export const nav = {
   lateral: 0, // actual sideways position, manual drift plus door pull
   bobPhase: 0, // advances with distance; one footstep every half cycle
   flicker: 1,
+  /* 0 = lights out, 1 = lights on, damped. Advanced once per frame by Rig and
+   * read by every surface in the building. It lives here rather than in each
+   * component because the lobby and the rooms have to arrive together — two
+   * components damping their own copy drift apart the moment one of them is
+   * unmounted and remounted. */
+  lit: 0,
+  /* 0 = standing in the room, 1 = sat at the desk. Damped in Rig, which is the
+   * only thing that moves the camera. */
+  sitT: 0,
 }
 
 /* Dev handle. Lets you drive the walk from the console — e.g.

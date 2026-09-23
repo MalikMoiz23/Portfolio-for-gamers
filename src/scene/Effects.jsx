@@ -23,7 +23,11 @@ export default function Effects() {
   if (lowSpec) {
     return (
       <EffectComposer multisampling={0} frameBufferType={THREE.HalfFloatType}>
+        {/* A cheap bloom is still worth keeping on weak hardware — without it
+            none of the neon reads as neon. Everything else goes. */}
+        <Bloom intensity={0.7} luminanceThreshold={0.62} luminanceSmoothing={0.3} mipmapBlur radius={0.6} />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+        <HueSaturation saturation={0.2} hue={0} />
         <Vignette offset={0.28} darkness={1.05} blendFunction={BlendFunction.NORMAL} />
         <Noise opacity={0.05} blendFunction={BlendFunction.OVERLAY} />
       </EffectComposer>
@@ -32,13 +36,17 @@ export default function Effects() {
 
   return (
     <EffectComposer multisampling={4} frameBufferType={THREE.HalfFloatType}>
-      {/* Threshold high enough that only actual light sources bloom. Lower and
-          a lit doorway reveal blows into a white slab, and the text on the room
-          boards grows a halo that reads as out of focus. */}
-      <Bloom intensity={0.55} luminanceThreshold={0.62} luminanceSmoothing={0.26} mipmapBlur radius={0.68} />
+      {/* Threshold sits just under the neon so the strips, the door bleed and
+          the monitors all blow out, while the board text — which is deliberately
+          dim — stays under it and keeps its edges. Drop below ~0.5 and the type
+          grows a halo that reads as out of focus. */}
+      <Bloom intensity={0.95} luminanceThreshold={0.55} luminanceSmoothing={0.3} mipmapBlur radius={0.78} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      <HueSaturation saturation={-0.14} hue={0} />
-      <BrightnessContrast brightness={0.018} contrast={0.09} />
+      {/* Positive now, not negative. ACES already desaturates hard in the
+          highlights; pulling saturation down on top of it turned every accent
+          into grey with an opinion. */}
+      <HueSaturation saturation={0.24} hue={0} />
+      <BrightnessContrast brightness={0.012} contrast={0.14} />
       <ChromaticAberration offset={ca} radialModulation modulationOffset={0.42} />
       <Vignette offset={0.26} darkness={0.98} blendFunction={BlendFunction.NORMAL} />
       <Noise opacity={0.055} blendFunction={BlendFunction.OVERLAY} />

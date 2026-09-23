@@ -38,9 +38,41 @@ export const cameraZ = (pos) => B.entry - pos
 export const OPEN_FROM = 1.6
 export const OPEN_TO = 5.4
 
-/* Ceiling tubes: one every other door bay, offset so you always have a dark
- * stretch between pools of light. */
+/* Where the camera ends up once you sit down at the desk in PROJECTS, in room
+ * local space: `x` is metres from the doorway wall, `eye` is seated eye height.
+ * Close enough to actually read the screen. The monitor is at 6.28m, so this
+ * puts the eye 0.88m from it — normal desk distance, and the point at which a
+ * 1.3m panel fills roughly three quarters of the view. At the earlier 4.98m the
+ * text was technically on screen and practically unreadable.
+ *
+ * The yaw does not change: you are already facing the far wall, which is where
+ * the desk is. */
+export const SEAT = { x: 5.4, eye: 1.26 }
+
+/* How far into a room entering stops you, as a fraction of the room's depth.
+ *
+ * PROJECTS needs its own: its desk is against the FAR wall, so stopping at the
+ * usual 0.66 puts the camera 0.6m from the chair and half a metre above it —
+ * the chair projects below the bottom of the screen and you cannot see, let
+ * alone click, the thing the room is asking you to sit on. At 0.42 the whole
+ * desk is in front of you and sitting down is a real 2.2m move.
+ */
+const STAND_DEPTH = { projects: 0.42 }
+const STAND_DEFAULT = 0.66
+export const standDepth = (room) => STAND_DEPTH[room?.id] ?? STAND_DEFAULT
+
+/* Ceiling fittings down the hall.
+ *
+ * `lit` is the important field. Every fitting is drawn, but only every other
+ * one carries a real light: three.js evaluates every light in the scene for
+ * every fragment it shades, so eight point lights down a corridor cost eight
+ * full passes whether or not you can see the far ones. Four brighter lights
+ * behind eight glowing diffusers look the same and cost half. */
 export const TUBES = []
-for (let z = -3.2; z > -END; z -= B.spacing * 0.72) {
-  TUBES.push({ z, seed: Math.round(-z * 137) })
+{
+  let i = 0
+  for (let z = -3.2; z > -END; z -= B.spacing * 0.72) {
+    TUBES.push({ z, seed: Math.round(-z * 137), lit: i % 2 === 0 })
+    i++
+  }
 }

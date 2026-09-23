@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { grain } from './canvasfx'
 
 /* ============================================================================
  * PROCEDURAL MATERIALS
@@ -417,6 +418,162 @@ function steelSurface(size) {
   })
 }
 
+/* ---- the finished room -------------------------------------------------- *
+ * The three below are the opposite of everything above them: no rot, no peel,
+ * no grime. They dress the ABOUT room, which is meant to read as somewhere
+ * somebody actually lives, in the middle of a building that does not.
+ *
+ * Their albedo sits near mid-grey on purpose. The room tints them at runtime by
+ * setting `color` on the material — dark slate with the bulb off, warm off-
+ * white with it on — and a map that is already dark or already light cannot be
+ * driven both ways. Mid-grey in, any tint out.
+ * ------------------------------------------------------------------------- */
+
+/* Painted plaster: the stipple a roller leaves, and nothing else. */
+function plasterSurface(size) {
+  const broad = fbm(1201, 4, 3)
+  const roller = fbm(1202, 4, 34)
+  const peel = fbm(1203, 3, 96) // orange peel, the fine stipple
+  const trowel = fbm(1204, 3, 7)
+
+  return bake(size, (u, v, o) => {
+    const b = broad(u, v)
+    const rl = roller(u, v)
+    const op = peel(u, v)
+
+    const base = 0.56 + (b - 0.5) * 0.045 + (rl - 0.5) * 0.028
+    o.r = base * 1.006
+    o.g = base
+    o.b = base * 0.984
+    o.h = 0.5 + (op - 0.5) * 0.5 + (rl - 0.5) * 0.14 + (trowel(u, v) - 0.5) * 0.08
+    o.rough = clamp01(0.87 + (op - 0.5) * 0.07)
+    o.metal = 0
+  })
+}
+
+/* Low loop-pile carpet. The rows have to be an integer number of cycles across
+ * the tile or the seam shows as a phase jump in the pile. */
+function carpetSurface(size) {
+  const pile = fbm(1301, 3, 104)
+  const tuft = fbm(1302, 4, 26)
+  const shade = fbm(1303, 4, 4)
+  const ROWS = 64
+
+  return bake(size, (u, v, o) => {
+    const p = pile(u, v)
+    const t = tuft(u, v)
+    const s = shade(u, v)
+    const row = 0.5 + 0.5 * Math.sin(v * Math.PI * 2 * ROWS + (t - 0.5) * 2.2)
+
+    const base = 0.44 + (s - 0.5) * 0.095 + (t - 0.5) * 0.085 + (p - 0.5) * 0.11
+    o.r = base * 1.03
+    o.g = base
+    o.b = base * 1.05 // a faint cool cast, so it never reads as beige
+    o.h = 0.46 + (p - 0.5) * 0.66 + row * 0.16 + (t - 0.5) * 0.18
+    o.rough = clamp01(0.96 + (p - 0.5) * 0.035)
+    o.metal = 0
+  })
+}
+
+/* Oak wainscot. Rings run across v; a low-frequency warp keeps them from
+ * looking like a barcode. */
+function woodSurface(size) {
+  const warpN = fbm(1401, 4, 5)
+  const fine = fbm(1402, 3, 58)
+  const blotch = fbm(1403, 3, 4)
+  const RINGS = 11
+
+  return bake(size, (u, v, o) => {
+    const warp = warpN(u, v)
+    const f = fine(u, v)
+    const bl = blotch(u, v)
+
+    const rings = Math.abs(Math.sin((v * RINGS + (warp - 0.5) * 1.6) * Math.PI))
+    const grain = Math.pow(rings, 0.55)
+
+    const base = 0.46 + (bl - 0.5) * 0.09 + (f - 0.5) * 0.05 - grain * 0.14
+    o.r = base * 1.16
+    o.g = base * 0.94
+    o.b = base * 0.72
+    o.h = 0.5 - grain * 0.22 + (f - 0.5) * 0.12
+    o.rough = clamp01(0.52 + grain * 0.22 + (f - 0.5) * 0.06)
+    o.metal = 0
+  })
+}
+
+/* Cut stone, running bond. Serves double duty: big blocks on the facade and,
+ * at a tighter UV density, paving on the apron outside. Like the three above it
+ * bakes near mid-grey so the entrance can be tinted from night to day. */
+function stoneSurface(size) {
+  const grain = fbm(1501, 4, 26)
+  const blotch = fbm(1502, 4, 5)
+  const speck = fbm(1503, 2, 72)
+  const ROWS = 4
+  const COLS = 3
+  const JOINT = 0.04
+
+  /* Per-block tone. A cheap integer hash rather than another noise field: every
+   * block needs ONE value for its whole face, and sampling a noise field would
+   * give it a gradient instead. */
+  const blockTone = (row, col) => {
+    let h = (row * 73856093) ^ (col * 19349663)
+    h = Math.imul(h ^ (h >>> 13), 1274126177)
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+  }
+
+  return bake(size, (u, v, o) => {
+    const row = Math.floor(v * ROWS) % ROWS
+    // every other course steps half a block along, which is what stops the
+    // joints lining up into continuous vertical seams
+    const uu = (u + (row % 2) * 0.5) % 1
+    const col = Math.floor(uu * COLS) % COLS
+
+    const fu = uu * COLS - Math.floor(uu * COLS)
+    const fv = v * ROWS - Math.floor(v * ROWS)
+    // the joint is a fixed width in metres, so it needs different fractions on
+    // each axis — the blocks are wider than they are tall
+    const ju = JOINT
+    const jv = (JOINT * COLS) / ROWS
+    const joint = Math.max(
+      1 - smoothstep(0, ju, fu),
+      1 - smoothstep(0, ju, 1 - fu),
+      1 - smoothstep(0, jv, fv),
+      1 - smoothstep(0, jv, 1 - fv),
+    )
+
+    const g = grain(u, v)
+    const b = blotch(u, v)
+    const tone = blockTone(row, col)
+
+    let base = 0.5 + (tone - 0.5) * 0.11 + (b - 0.5) * 0.06 + (g - 0.5) * 0.045
+    let r = base * 1.01
+    let gg = base
+    let bl = base * 0.965
+    let h = 0.58 + (g - 0.5) * 0.12
+    let rough = 0.8 + (g - 0.5) * 0.1
+
+    // the joint is mortar: darker, rougher, and recessed
+    r = mix(r, base * 0.6, joint)
+    gg = mix(gg, base * 0.6, joint)
+    bl = mix(bl, base * 0.58, joint)
+    h -= joint * 0.35
+    rough = mix(rough, 0.95, joint)
+
+    // pinprick speckle so a cut face is not a flat fill
+    const sp = smoothstep(0.74, 0.96, speck(u, v))
+    r *= 1 - sp * 0.12
+    gg *= 1 - sp * 0.12
+    bl *= 1 - sp * 0.12
+
+    o.r = r
+    o.g = gg
+    o.b = bl
+    o.h = h
+    o.rough = clamp01(rough)
+    o.metal = 0
+  })
+}
+
 /* ---- text decals -------------------------------------------------------- */
 
 /* Stencilled sign, worn. Used for door plates and wall markings. */
@@ -460,12 +617,7 @@ export function makeSign(text, opts = {}) {
   }
   ctx.globalCompositeOperation = 'source-over'
   ctx.globalAlpha = 1
-  for (let i = 0; i < 900; i++) {
-    ctx.fillStyle = `rgba(0,0,0,${r() * 0.22})`
-    const x = r() * w
-    const y = r() * h
-    ctx.fillRect(x, y, 1 + r() * 4, 1 + r() * 4)
-  }
+  grain(ctx, w, h, 0.7, true)
 
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = THREE.SRGBColorSpace
@@ -483,6 +635,10 @@ const RECIPES = [
   ['floor', 'Laying the floor', () => pack(floorSurface(512), { normalStrength: 4 })],
   ['ceiling', 'Hanging the ceiling', () => pack(ceilingSurface(256), { normalStrength: 2.4 })],
   ['steel', 'Fitting the doors', () => pack(steelSurface(256), { normalStrength: 3 })],
+  ['plaster', 'Skimming the walls', () => pack(plasterSurface(256), { normalStrength: 1.8 })],
+  ['carpet', 'Laying the carpet', () => pack(carpetSurface(256), { normalStrength: 3.4 })],
+  ['wood', 'Fitting the wainscot', () => pack(woodSurface(256), { normalStrength: 2.2 })],
+  ['stone', 'Facing the entrance', () => pack(stoneSurface(512), { normalStrength: 3.2 })],
 ]
 
 /* Bakes one recipe per animation frame so the loading bar can actually move
