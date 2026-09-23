@@ -10,6 +10,9 @@ import { makeRoomBoards } from '../board'
 import { nav } from '../store'
 import AboutRoom from './AboutRoom'
 import ProjectsRoom from './ProjectsRoom'
+import SkillsRoom from './SkillsRoom'
+import HistoryRoom from './HistoryRoom'
+import ContactRoom from './ContactRoom'
 
 const D = 0.42
 
@@ -365,6 +368,16 @@ function Dressing({ room }) {
 
 /* ---- the room, mounted only while you are in it -------------------------- */
 
+/* Every finished room, by id. Anything not listed falls through to the plain
+ * concrete shell at the bottom of this file. */
+const FINISHED = {
+  about: AboutRoom,
+  projects: ProjectsRoom,
+  skills: SkillsRoom,
+  experience: HistoryRoom,
+  contact: ContactRoom,
+}
+
 /* `warm` marks the warmup pass: the room is mounted only so its materials get
  * rendered once and their shaders compiled while the loading screen is still
  * up. It has to be VISIBLE for that — three skips invisible objects — so it
@@ -380,14 +393,16 @@ export default function Room({ door, warm = false }) {
     if (grp.current) grp.current.visible = warm || nav.roomT > 0.001
   })
 
-  /* The finished rooms share none of the fabric below — their own shell, their
-   * own lighting, their own way of carrying content. Everything still in the
-   * switch further down is the original concrete cell with things hung on the
-   * walls. */
-  if (room.id === 'about' || room.id === 'projects') {
+  /* Every room in content.js is now finished: its own shell, its own lighting,
+   * its own way of carrying content. The concrete-cell code further down is
+   * what they all used to be, and survives only as the fallback for a room id
+   * this table does not know — add a room and you get a plain box rather than
+   * an empty doorway. */
+  const Finished = FINISHED[room.id]
+  if (Finished) {
     return (
       <group ref={grp} position={[originX, 0, z]} rotation={[0, rot, 0]}>
-        {room.id === 'about' ? <AboutRoom room={room} /> : <ProjectsRoom room={room} />}
+        <Finished room={room} />
       </group>
     )
   }

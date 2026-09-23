@@ -7,6 +7,11 @@ import * as audio from '../audio'
 /* The overlay. The depth readout and the progress bar are written straight to
  * the DOM on a rAF loop — routing 60fps values through React state would
  * re-render the whole tree every frame. */
+/* Rooms that print their own line along the bottom. Anything not listed gets
+ * the generic "look around" hint — an interaction nobody is told about is an
+ * interaction nobody finds. */
+const HINTED = ['about', 'projects', 'skills', 'experience', 'contact']
+
 export default function Hud() {
   const phase = useStore((s) => s.phase)
   const hover = useStore((s) => s.hoverRoom)
@@ -195,7 +200,25 @@ export default function Hud() {
         </div>
       )}
 
-      {inside && !(active >= 0 && ['about', 'projects'].includes(ROOMS[active].id)) && (
+      {inside && active >= 0 && ROOMS[active].id === 'skills' && (
+        <div className="room-hint">
+          <span>CLICK THE BENCH LAMP</span> to power the gauges · <span>ESC</span> to leave
+        </div>
+      )}
+
+      {inside && active >= 0 && ROOMS[active].id === 'experience' && (
+        <div className="room-hint">
+          <span>PULL A DRAWER</span> to bring up that year · <span>ESC</span> to leave
+        </div>
+      )}
+
+      {inside && active >= 0 && ROOMS[active].id === 'contact' && (
+        <div className="room-hint">
+          <span>CLICK A PLATE</span> to open it · <span>CLICK THE BULB</span> for lights
+        </div>
+      )}
+
+      {inside && !(active >= 0 && HINTED.includes(ROOMS[active].id)) && (
         <div className="room-hint">
           <span>MOVE THE MOUSE</span> to look around the room · <span>ESC</span> to leave
         </div>

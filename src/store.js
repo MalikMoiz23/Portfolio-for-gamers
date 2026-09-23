@@ -23,6 +23,8 @@ export const state = {
   aboutPage: 0, // which panel of the sliding ABOUT board is showing
   seated: false, // sat at the desk in PROJECTS
   openProject: -1, // which project window is open on the desktop, -1 = none
+  gaugesOn: false, // the SKILLS bench lamp, which powers the gauge board
+  openDrawer: -1, // which archive drawer is pulled out in HISTORY, -1 = none
 }
 
 export function set(patch) {
@@ -90,6 +92,19 @@ export function standUp() {
 export function openProject(index) {
   if (state.openProject === index) return
   set({ openProject: index })
+  audio.tick()
+}
+
+/* The SKILLS bench lamp. The gauges sweep up from zero when it comes on, so
+ * this is a toggle rather than a level. */
+export function toggleGauges() {
+  set({ gaugesOn: !state.gaugesOn })
+  audio.tick()
+}
+
+/* One archive drawer at a time — pulling a second pushes the first back. */
+export function openDrawer(index) {
+  set({ openDrawer: state.openDrawer === index ? -1 : index })
   audio.tick()
 }
 

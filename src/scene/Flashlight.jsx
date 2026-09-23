@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { state, useStore } from '../store'
+import { state, nav, useStore } from '../store'
 import { damp } from './util'
 
 const REACH = 10 // how far ahead the beam is aimed
@@ -104,7 +104,17 @@ export default function Flashlight() {
     const glitch = glitching ? (Math.sin(t * 61) > 0 ? 0.25 : 1) : 1
     const scale = wob * glitch
 
-    const hot = state.phase === 'inside' ? 42 : 58
+    /* The torch belongs to the corridor. Inside a finished room it was still
+     * running at full power and was, measured at the HISTORY cards, 72% of all
+     * the light falling on them — which is what was blowing the text out. The
+     * rooms light themselves; the beam fades as you walk in, and further once
+     * the building's lights are on.
+     *
+     * Not off entirely: at roomT 1 with the lights out there is still a little
+     * left, because a room lit only by its cove should still feel like
+     * somewhere you brought a torch into. */
+    const indoors = 1 - nav.roomT * (0.72 + nav.lit * 0.22)
+    const hot = (state.phase === 'inside' ? 42 : 58) * indoors
     if (spot.current) {
       spot.current.position.set(px, py, pz)
       spot.current.intensity = damp(spot.current.intensity, hot * scale, 14, dt)
@@ -112,10 +122,13 @@ export default function Flashlight() {
     // a wide, weak corona so the pool of light has no hard rim
     if (wide.current) {
       wide.current.position.set(px, py, pz)
-      wide.current.intensity = damp(wide.current.intensity, 16 * scale, 14, dt)
+      wide.current.intensity = damp(wide.current.intensity, 16 * scale * indoors, 14, dt)
     }
     if (target.current) target.current.position.copy(aim)
-    if (fill.current) fill.current.position.set(px, py, pz)
+    if (fill.current) {
+      fill.current.position.set(px, py, pz)
+      fill.current.intensity = damp(fill.current.intensity, 3.1 * indoors, 14, dt)
+    }
 
     // haze slices ride along the beam, always square to the camera
     beam.set(aim.x - px, aim.y - py, aim.z - pz).normalize()
