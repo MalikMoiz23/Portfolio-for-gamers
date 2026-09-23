@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { useEffect, useRef, useState } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { PerformanceMonitor } from '@react-three/drei'
 import * as THREE from 'three'
 import { B, DOORS } from '../layout'
@@ -20,8 +20,11 @@ function Atmosphere() {
   useEffect(() => {
     const env = buildEnvironment(gl)
     scene.environment = env
-    scene.environmentIntensity = 0.9
-    scene.fog = new THREE.FogExp2(new THREE.Color('#05070a'), 0.045)
+    scene.environmentIntensity = 1.15
+    /* The fog colour is what every distant surface fades into, so it sets the
+     * hue of the whole building more than any light does. A blue-violet reads
+     * as depth; the old near-black just read as "off". */
+    scene.fog = new THREE.FogExp2(new THREE.Color('#070a18'), 0.043)
     scene.background = new THREE.Color('#000000')
     return () => {
       scene.environment = null
@@ -32,15 +35,51 @@ function Atmosphere() {
   return null
 }
 
+/* ---------------------------------------------------------------------------
+ * WARMUP
+ * Three compiles a shader program the first time a material is rendered, and
+ * the program's cache key includes the NUMBER OF LIGHTS in the scene. Walking
+ * into a room adds nine, so every material in view needed a fresh program at
+ * exactly the moment the door swung open — measured at 2 to 3.5 seconds of
+ * frozen main thread, and it happened again on re-entry because leaving took
+ * the count back down.
+ *
+ * So mount each room for a few frames while the loading screen is still up.
+ * Three caches the programs by key, and the real visit reuses them.
+ *
+ * ONE AT A TIME, deliberately. Mounting all five together would be a 56-light
+ * scene and would compile programs for a configuration that never occurs.
+ * ------------------------------------------------------------------------- */
+function Warmup() {
+  const [i, setI] = useState(0)
+  const held = useRef(0)
+
+  useFrame(() => {
+    // two rendered frames each: one to compile, one to be sure it landed
+    if (++held.current < 2) return
+    held.current = 0
+    if (i >= DOORS.length) {
+      set({ phase: 'ready' })
+      return
+    }
+    setI(i + 1)
+  })
+
+  if (i >= DOORS.length) return null
+  return <Room door={DOORS[i]} warm />
+}
+
 function World() {
   const active = useStore((s) => s.activeRoom)
+  const phase = useStore((s) => s.phase)
   return (
     <>
       <Atmosphere />
-      <ambientLight intensity={0.085} color="#48586a" />
+      <ambientLight intensity={0.12} color="#3c63a8" />
       <Rig />
       <Flashlight />
       <Corridor />
+      {phase === 'warming' && <Warmup />}
       {active >= 0 && <Room door={DOORS[active]} />}
       <Dust />
       <Effects />
@@ -63,6 +102,10 @@ export default function Scene() {
       }}
       onCreated={(root) => {
         root.gl.shadowMap.type = THREE.PCFSoftShadowMap
+        /* The ABOUT room's sliding board clips its panels against the frame
+         * aperture. Without this the clippingPlanes on those materials are
+         * ignored and every panel is drawn in full, side by side. */
+        root.gl.localClippingEnabled = true
         if (import.meta.env.DEV && window.__portfolio) window.__portfolio.three = root
       }}
     >

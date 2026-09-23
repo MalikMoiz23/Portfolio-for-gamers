@@ -34,7 +34,12 @@ export default function App() {
     buildTextures((p, label) => {
       if (alive) set({ progress: p, progressLabel: label })
     }).then(() => {
-      if (alive) set({ phase: 'ready' })
+      /* 'warming', not 'ready'. The bake is done but no shader has been
+       * compiled yet, and compiling them is what used to freeze the page for
+       * seconds the first time each door opened. Scene mounts now, behind the
+       * loading screen, and Warmup walks every room through the renderer so
+       * three has built and cached each one's programs before anyone walks. */
+      if (alive) set({ phase: 'warming' })
     })
     return () => {
       alive = false
@@ -46,7 +51,7 @@ export default function App() {
   return (
     <>
       {phase !== 'boot' && <Scene />}
-      {phase === 'boot' && <Boot />}
+      {(phase === 'boot' || phase === 'warming') && <Boot />}
       <Title />
       <Hud />
     </>
